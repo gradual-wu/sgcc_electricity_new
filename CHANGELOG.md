@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.15.3] - 2026-10-21
+
+### Fixed
+
+- 在 Python 进程最早期用 `print(..., flush=True)` 输出 stdout 标记，方便确认容器是否真正执行到代码。
+- 增加文件日志（默认 `/config/sgcc_electricity.log`，自动轮转），即使 Supervisor 日志页空白也能在 HA 配置目录查看。
+- 新增 `LOG_FILE`、`LOG_FILE_MAX_BYTES`、`LOG_FILE_BACKUP_COUNT` 配置项和中英文说明。
+
 ## [v1.15.2] - 2026-10-21
 
 ### Fixed

@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.15.2"
+version: "v1.15.3"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -80,6 +80,12 @@ options:
   LOG_LEVEL: "INFO"
   # 心跳日志间隔（分钟），用于确认插件仍在运行
   HEARTBEAT_LOG_MINUTES: 30
+  # 文件日志路径；留空自动使用 /config/sgcc_electricity.log
+  LOG_FILE: "/config/sgcc_electricity.log"
+  # 单个日志文件最大字节数
+  LOG_FILE_MAX_BYTES: 1048576
+  # 日志文件保留份数
+  LOG_FILE_BACKUP_COUNT: 3
   # 登录/页面操作的等待秒数
   RETRY_WAIT_TIME_OFFSET_UNIT: 15
   # 账单/交费/阶梯等数据页的等待秒数
@@ -177,6 +183,9 @@ schema:
   JOB_START_TIME: str
   LOG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR)?"
   HEARTBEAT_LOG_MINUTES: int(1,1440)?
+  LOG_FILE: str?
+  LOG_FILE_MAX_BYTES: int?
+  LOG_FILE_BACKUP_COUNT: int?
   RETRY_WAIT_TIME_OFFSET_UNIT: int(2,30)
   PAGE_WAIT_TIME: int(2,60)?
   DATA_RETENTION_DAYS: int

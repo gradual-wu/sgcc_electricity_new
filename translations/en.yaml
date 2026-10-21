@@ -77,6 +77,15 @@ configuration:
   HEARTBEAT_LOG_MINUTES:
     name: Heartbeat interval
     description: Minutes between heartbeat log lines that confirm the add-on is running.
+  LOG_FILE:
+    name: Log file
+    description: File log path. Empty uses /config/sgcc_electricity.log in the add-on.
+  LOG_FILE_MAX_BYTES:
+    name: Log file max size
+    description: Maximum size of a log file before rotation.
+  LOG_FILE_BACKUP_COUNT:
+    name: Log file backups
+    description: Number of rotated log files to keep.
   RETRY_WAIT_TIME_OFFSET_UNIT:
     name: Login and page wait
     description: Seconds to wait after login and page actions.

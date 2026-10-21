@@ -261,6 +261,8 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `JOB_START_TIME` | 每日执行时间，默认 `07:00`，每 12 小时执行一次 |
 | `LOG_LEVEL` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
 | `HEARTBEAT_LOG_MINUTES` | 心跳日志间隔（分钟），用于确认插件仍在运行，默认 `30` |
+| `LOG_FILE` | 文件日志路径，默认 `/config/sgcc_electricity.log`；日志页空白时可在这里查看 |
+| `LOG_FILE_MAX_BYTES` / `LOG_FILE_BACKUP_COUNT` | 日志轮转大小和保留份数 |
 | `IGNORE_USER_ID` | 需要忽略的户号，多个用英文逗号分隔 |
 | `BALANCE` | 余额低于此值时触发通知（元） |
 

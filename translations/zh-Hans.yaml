@@ -77,6 +77,15 @@ configuration:
   HEARTBEAT_LOG_MINUTES:
     name: 心跳日志间隔
     description: 每隔多少分钟输出一次心跳日志，用于确认插件仍在运行。
+  LOG_FILE:
+    name: 日志文件
+    description: 文件日志路径；留空使用 /config/sgcc_electricity.log。
+  LOG_FILE_MAX_BYTES:
+    name: 日志文件大小
+    description: 单个日志文件的最大字节数，超过后轮转。
+  LOG_FILE_BACKUP_COUNT:
+    name: 日志备份份数
+    description: 保留的轮转日志文件份数。
   RETRY_WAIT_TIME_OFFSET_UNIT:
     name: 登录/页面等待
     description: 登录和页面操作后的等待秒数。

@@ -23,6 +23,8 @@ def mask_phone(value):
 
 def main():
     global RETRY_TIMES_LIMIT
+    # 直接用 print 打一条 stdout 标记，即使 logging 配置异常也能在 Docker 日志里看到
+    print("SGCC Electricity add-on starting (stdout marker)", flush=True)
     # 先建立 stdout 日志，确保 options/env 读取阶段的日志也能出现在 HA 加载项日志里
     logging.basicConfig(
         level=logging.INFO,
@@ -189,6 +191,29 @@ def logger_init(level: str):
     sh = logging.StreamHandler(stream=sys.stdout)
     sh.setFormatter(format)
     logger.addHandler(sh)
+
+    # 额外写一份文件日志，避免 Supervisor 日志页异常时完全看不到日志。
+    default_log_file = (
+        "/config/sgcc_electricity.log"
+        if "PYTHON_IN_DOCKER" in os.environ
+        else os.path.join(get_data_dir(), "sgcc_electricity.log")
+    )
+    log_file = os.getenv("LOG_FILE", "").strip() or default_log_file
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+        fh = RotatingFileHandler(
+            log_file,
+            maxBytes=max(int(os.getenv("LOG_FILE_MAX_BYTES", "1048576")), 10240),
+            backupCount=max(int(os.getenv("LOG_FILE_BACKUP_COUNT", "3")), 1),
+            encoding="utf-8",
+        )
+        fh.setFormatter(format)
+        logger.addHandler(fh)
+        logger.info("文件日志已启用: %s", log_file)
+    except Exception as exc:
+        logger.warning("无法启用文件日志 %s: %s", log_file, exc)
     logger.propagate = False
 
 
