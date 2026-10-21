@@ -49,7 +49,7 @@ def main():
         logging.error(f"读取 .env 文件失败，程序将退出，错误信息: {e}。")
         sys.exit()
 
-    logging.info(f"当前仓库版本为 {VERSION}，仓库地址为 https://github.com/ARC-MX/sgcc_electricity_new.git")
+    logging.info(f"当前仓库版本为 {VERSION}，仓库地址为 https://github.com/gradual-wu/sgcc_electricity_new.git")
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"当前日期为 {current_datetime}。")
 
@@ -63,6 +63,11 @@ def main():
     random_delay_minutes = random.randint(-10, 10)
     parsed_time = datetime.strptime(JOB_START_TIME, "%H:%M") + timedelta(minutes=random_delay_minutes)
     logging.info(f"当前登录用户名为 {PHONE_NUMBER}，Home Assistant 地址为 {HASS_URL}，程序将每天在 {parsed_time.strftime('%H:%M')} 执行。")
+    logging.info(
+        f"MQTT 配置: {os.getenv('MQTT_HOST') or '(从 HASS_URL 推断)'}:"
+        f"{os.getenv('MQTT_PORT', '1883')}，"
+        f"状态前缀 {os.getenv('MQTT_STATE_PREFIX', 'sgcc_electricity')}。"
+    )
 
     # 添加随机延迟
     next_run_time = parsed_time + timedelta(hours=12)
@@ -84,8 +89,13 @@ def main():
         logging.info("已从缓存恢复数据，跳过启动时抓取以保护账号。")
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("收到退出信号，正在关闭 MQTT 连接...")
+            updator.close()
+            break
 
 
 def republish_or_fetch(updator: SensorUpdator, fetcher: DataFetcher):

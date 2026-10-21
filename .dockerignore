@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.env
+data
+tests
+assets
+ha_addons_doc
+*.md
+!README.md

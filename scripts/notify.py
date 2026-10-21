@@ -12,15 +12,17 @@ class PushplusNotify(typ.NamedTuple):
         logging.info(f"检查电费余额。当余额低于 {BALANCE} 元时，将发送通知")
         if balance < BALANCE :
             PUSHPLUS_TOKEN = os.getenv("PUSHPLUS_TOKEN").split(",")
+            success = False
             for token in PUSHPLUS_TOKEN:
                 title = "电费余额不足提醒"
                 content = (f"您用户号{user_id}的当前电费余额为：{balance}元，请及时充值。" )
                 url = ("http://www.pushplus.plus/send?token="+ token+ "&title="+ title+ "&content="+ content)
                 resp = requests.get(url)
+                success = resp.status_code == 200 or success
                 logging.info(
                     f"用户 {user_id} 当前余额 {balance} 元低于 {BALANCE} 元，已发送通知，请注意查收并及时充值。"
                 )
-                return resp.status_code == 200
+            return success
         return False
 
 class UrlPushNotify(typ.NamedTuple):
@@ -59,20 +61,26 @@ class UrlLoginQrCodeNotify(typ.NamedTuple):
         hass_token = os.getenv("HASS_TOKEN", "")
         if hass_url and hass_token:
             try:
-                # 保存图片到 /config/www/，使其可通过 {HASS_URL}/local/ 访问
-                www_dir = "/config/www"
-                os.makedirs(www_dir, exist_ok=True)
-                qr_path = os.path.join(www_dir, "sgcc_login_qr.png")
-                with open(qr_path, "wb") as f:
-                    f.write(qrcode)
-                logging.info(f"二维码已保存到 {qr_path}")
-
                 ts = int(time.time())
+                image_markdown = ""
+                try:
+                    # 保存图片到 HA 的 www 目录，使其可通过 {HASS_URL}/local/ 访问
+                    www_dir = os.getenv("HASS_WWW_DIR", "/config/www")
+                    os.makedirs(www_dir, exist_ok=True)
+                    qr_path = os.path.join(www_dir, "sgcc_login_qr.png")
+                    with open(qr_path, "wb") as f:
+                        f.write(qrcode)
+                    logging.info(f"二维码已保存到 {qr_path}")
+                    image_markdown = f"![登录二维码](/local/sgcc_login_qr.png?t={ts})"
+                except Exception as e:
+                    logging.warning(f"保存二维码到 HA www 目录失败: {e}")
+                    image_markdown = "二维码已保存到 /data/login_qr_code.png，请在容器内查看。"
+
                 message = (
                     f"**触发原因**: {reason}\n\n"
                     f"请用**国家电网 App** 扫描下方二维码登录，"
                     f"二维码将在约 3 分钟内过期：\n\n"
-                    f"![登录二维码](/local/sgcc_login_qr.png?t={ts})"
+                    f"{image_markdown}"
                 )
                 headers = {
                     "Authorization": f"Bearer {hass_token}",

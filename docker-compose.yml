@@ -1,9 +1,16 @@
 services:
   sgcc_electricity_app:
+    # 本地构建：直接使用当前目录下的代码（包含你的修改）
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: local
+    image: sgcc_electricity_local
+    # 也可以改用 GitHub Actions 构建好的镜像：
+    # image: ghcr.io/gradual-wu/sgcc_electricity-amd64:latest
     env_file:
       - .env
-    image: registry.cn-hangzhou.aliyuncs.com/arcw/sgcc_electricity:latest # for use docker.io: arcw/sgcc_electricity:latest
-    # image: sgcc_electricity_test      # for local test
     container_name: sgcc_electricity
     network_mode: "host"
     environment:

@@ -19,6 +19,8 @@ from typing import Optional
 
 from const import *
 
+from date_utils import normalize_month, normalize_year, to_float
+
 import numpy as np
 from captcha_selenium import solve_captcha_in_browser
 import vue_state
@@ -71,9 +73,6 @@ class DataFetcher:
         # 点击后添加微小随机暂停，模拟人工操作
         time.sleep(random.uniform(0.1, 0.5))
 
-
-    def insert_expand_data(self, data:dict):
-        self.db.insert_expand_data(data)
 
     def _get_webdriver(self):
         chrome_options = webdriver.ChromeOptions()
@@ -474,10 +473,18 @@ class DataFetcher:
                     continue
                 else:
                     ### 获取数据
-                    balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance = self._get_all_data(driver, user_id, userid_index)
+                    (balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage,
+                     month_charge, month_usage, tou_data, enhanced_balance, bill_tou_data,
+                     user_name, month_period) = self._get_all_data(driver, user_id, userid_index)
                     logging.info(f"用户 [{user_id}] 数据获取完成: 余额={balance}元, 最近日用电={last_daily_usage}度({last_daily_date}), "
                                  f"年度用电={yearly_usage}度, 年度电费={yearly_charge}元, 月用电={month_usage}度, 月电费={month_charge}元")
-                    updator.update_one_userid(user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data=tou_data, enhanced_balance=enhanced_balance)
+                    updator.update_one_userid(
+                        user_id, balance, last_daily_date, last_daily_usage,
+                        yearly_charge, yearly_usage, month_charge, month_usage,
+                        tou_data=tou_data, enhanced_balance=enhanced_balance,
+                        bill_tou_data=bill_tou_data, user_name=user_name,
+                        month_period=month_period,
+                    )
 
                     time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
             except Exception as e:
@@ -579,17 +586,16 @@ class DataFetcher:
         else:
             logging.info(f"[{user_id}] 电费余额: {balance} 元")
 
-        # 尝试通过 Vue state 获取增强余额
+        # 尝试通过 Vue state 获取增强余额（与数据库是否启用无关，MQTT 也需要）
         enhanced_balance = None
         user_name = self._user_name_map.get(user_id, "")
         if user_name:
             logging.info(f"[{user_id}] 用户名: {user_name}")
-        if self.db is not None:
-            try:
-                components = vue_state.selected_vue_data(driver)
-                enhanced_balance = vue_state.normalize_balance(components)
-            except Exception as e:
-                logging.warning(f"[{user_id}] 增强余额获取失败: {e}")
+        try:
+            components = vue_state.selected_vue_data(driver)
+            enhanced_balance = vue_state.normalize_balance(components)
+        except Exception as e:
+            logging.warning(f"[{user_id}] 增强余额获取失败: {e}")
 
         logging.info(f"[{user_id}] 正在切换到用电量页面...")
         driver.get(ELECTRIC_USAGE_URL)
@@ -626,40 +632,42 @@ class DataFetcher:
         else:
             logging.info(f"[{user_id}] 最近用电: {last_daily_date} 用电 {last_daily_usage} 度")
 
-        # 尝试通过 Vue state 获取分时电量
-        tou_data = None
-        if self.db is not None:
-            try:
-                components = vue_state.selected_vue_data(driver)
-                usage_info = vue_state.normalize_usage(components)
-                tou_data = usage_info
-                logging.info(f"[{user_id}] Vue state 分时数据: 年度={usage_info.get('year')}, "
-                             f"月数据={len(usage_info.get('months', []))}条, "
-                             f"日数据={len(usage_info.get('daily', []))}条")
-                # 打印 Vue state 日数据详情
-                if usage_info.get("daily"):
-                    for d in usage_info["daily"][:7]:
-                        logging.info(f"  [日数据] {d.get('date')}: "
-                                     f"总={d.get('total_usage')}度, "
-                                     f"谷={d.get('valley_usage')}, 平={d.get('flat_usage')}, "
-                                     f"峰={d.get('peak_usage')}, 尖={d.get('tip_usage')}")
-                    if len(usage_info["daily"]) > 7:
-                        logging.info(f"  ... 还有 {len(usage_info['daily']) - 7} 条日数据")
-            except Exception as e:
-                logging.warning(f"[{user_id}] Vue state 分时数据获取失败: {e}")
-
-        # 尝试获取电费账单明细（月度分时）
+        # 先获取电费账单明细（月度分时）；保持在日用电量页面当前状态，
+        # 避免后续切换 30 天视图影响 Vue 里的 billList。
         bill_tou_data = None
-        if self.db is not None:
-            try:
-                bill_tou_data = self._get_bill_detail(driver, user_id)
-            except Exception as e:
-                logging.warning(f"[{user_id}] 电费账单分时数据获取失败: {e}")
+        try:
+            bill_tou_data = self._get_bill_detail(driver, user_id)
+        except Exception as e:
+            logging.warning(f"[{user_id}] 电费账单分时数据获取失败: {e}")
+
+        # 先切换到 7/30 天视图并读取 DOM，再读取 Vue state，
+        # 这样 tou_data 里的日分时数据也能覆盖整个 30 天窗口。
+        date_list, usage_list = self._get_daily_usage_data(driver)
+
+        # 尝试通过 Vue state 获取分时电量（与数据库是否启用无关，MQTT 也需要）
+        tou_data = None
+        try:
+            components = vue_state.selected_vue_data(driver)
+            usage_info = vue_state.normalize_usage(components)
+            tou_data = usage_info
+            logging.info(f"[{user_id}] Vue state 分时数据: 年度={usage_info.get('year')}, "
+                         f"月数据={len(usage_info.get('months', []))}条, "
+                         f"日数据={len(usage_info.get('daily', []))}条")
+            # 打印 Vue state 日数据详情
+            if usage_info.get("daily"):
+                for d in usage_info["daily"][:7]:
+                    logging.info(f"  [日数据] {d.get('date')}: "
+                                 f"总={d.get('total_usage')}度, "
+                                 f"谷={d.get('valley_usage')}, 平={d.get('flat_usage')}, "
+                                 f"峰={d.get('peak_usage')}, 尖={d.get('tip_usage')}")
+                if len(usage_info["daily"]) > 7:
+                    logging.info(f"  ... 还有 {len(usage_info['daily']) - 7} 条日数据")
+        except Exception as e:
+            logging.warning(f"[{user_id}] Vue state 分时数据获取失败: {e}")
 
         # 数据库存储
         if self.db is not None:
             logging.info(f"[{user_id}] 数据库类型: {self.db_type}, 开始保存数据到数据库")
-            date_list, usage_list = self._get_daily_usage_data(driver)
             self._save_user_data(
                 user_id, balance, enhanced_balance,
                 last_daily_date, last_daily_usage,
@@ -680,7 +688,15 @@ class DataFetcher:
         else:
             month_usage = None
 
-        return balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance
+        # 月度传感器对应的是 DOM 表格最后一行，不一定是当前自然月
+        page_year = normalize_year((tou_data or {}).get("year")) or str(
+            datetime.now().year - 1 if datetime.now().month == 1 else datetime.now().year
+        )
+        month_period = self._format_month(month[-1], page_year) if month else None
+
+        return (balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage,
+                month_charge, month_usage, tou_data, enhanced_balance, bill_tou_data,
+                user_name, month_period)
 
     def _get_user_ids(self, driver):
         """获取用户 ID 列表。优先从 el-dropdown 获取（余额页面），
@@ -879,7 +895,7 @@ class DataFetcher:
     def _get_daily_usage_data(self, driver):
         """获取每日用电量数据 (7天或30天)，通过 radio 按钮切换，失败时返回空列表"""
         try:
-            fetch_days = int(os.getenv("DAILY_FETCH_DAYS", 7))
+            fetch_days = int(os.getenv("DAILY_FETCH_DAYS", 30))
             if fetch_days not in (7, 30):
                 fetch_days = 7
             logging.info(f"正在获取每日用电量数据 (最近 {fetch_days} 天)")
@@ -981,7 +997,7 @@ class DataFetcher:
         """从用电量页面通过 Vue state 获取月度分时电量"""
         logging.info(f"[{user_id}] 尝试从当前页面获取电费账单分时数据...")
         try:
-            # 不再跳转到 403 的 BILL_SUMMARY_URL, 直接从当前页面提取
+            # 不再跳转到会返回 403 的账单汇总页面, 直接从当前页面提取
             components = vue_state.selected_vue_data(driver)
             bill = vue_state.normalize_bill_detail(components)
             if bill.get("month"):
@@ -995,6 +1011,21 @@ class DataFetcher:
             logging.warning(f"[{user_id}] 获取账单分时数据异常: {e}")
             return None
 
+    @staticmethod
+    def _format_month(value, year_hint: str):
+        """把国网页面上的月份文本格式化为 YYYY-MM。
+
+        页面可能出现 "1月1日-1月31日"、"01"、"2026-09" 等格式；
+        没有年份时使用调用方传入的页面年份，避免 1 月查询上年数据时年份错位。
+        """
+        text = str(value or "").strip()
+        match = re.search(r'(\d{1,2})月', text)
+        if match:
+            return f"{year_hint}-{int(match.group(1)):02d}"
+        if re.fullmatch(r'\d{1,2}', text):
+            return f"{year_hint}-{int(text):02d}"
+        return normalize_month(text)
+
     def _save_user_data(self, user_id, balance, enhanced_balance,
                         last_daily_date, last_daily_usage,
                         date_list, usage_list,
@@ -1005,6 +1036,10 @@ class DataFetcher:
             logging.error(f"[{user_id}] 数据库连接失败, 数据未写入")
             return
 
+        # 1 月页面默认展示上一年数据；Vue state 的 year 是最可靠的页面年份
+        page_year = normalize_year((tou_data or {}).get("year")) or str(
+            datetime.now().year - 1 if datetime.now().month == 1 else datetime.now().year
+        )
         try:
             self.db.upsert_user(user_id, self._username, user_name)
             logging.info(f"[{user_id}] 用户信息已更新 (user_name={user_name})")
@@ -1026,14 +1061,14 @@ class DataFetcher:
                     try:
                         self.db.insert_daily_data({
                             "date": date_list[i],
-                            "total_usage": float(usage_list[i]),
+                            "total_usage": to_float(usage_list[i]),
                             "user_name": user_name,
                         })
                     except Exception as e:
                         logging.debug(f"[{user_id}] 日用电 {date_list[i]} 写入失败 (可能已存在): {e}")
                 logging.info(f"[{user_id}] 每日用电量已写入 {len(date_list)} 条")
 
-            # 写入 Vue state 分时日用电量
+            # 写入 Vue state 分时日用电量（覆盖 DOM 数据中的分时字段）
             if tou_data and tou_data.get("daily"):
                 tou_count = 0
                 for row in tou_data["daily"]:
@@ -1045,20 +1080,18 @@ class DataFetcher:
                         logging.debug(f"[{user_id}] 分时日用电 {row.get('date')} 写入失败: {e}")
                 logging.info(f"[{user_id}] Vue state 分时日用电已写入 {tou_count} 条")
 
-            # 写入月度用电量（DOM 方式）
+            # 写入月度用电量（DOM 方式，属于页面计算值）
             if month:
-                cur_year = str(datetime.now().year)
                 for i in range(len(month)):
                     try:
                         # 将 "1月1日-1月31日" 格式转为 "2026-01"
-                        m_text = month[i]
-                        m_num = re.search(r'(\d+)月', m_text)
-                        m_formatted = f"{cur_year}-{int(m_num.group(1)):02d}" if m_num else m_text
+                        m_formatted = self._format_month(month[i], page_year)
                         self.db.insert_monthly_data({
                             "month": m_formatted,
-                            "total_usage": float(month_usage[i]) if month_usage[i] else None,
-                            "total_charge": float(month_charge[i]) if month_charge[i] else None,
+                            "total_usage": to_float(month_usage[i]),
+                            "total_charge": to_float(month_charge[i]),
                             "user_name": user_name,
+                            "source": "calculated",
                         })
                     except Exception as e:
                         logging.debug(f"[{user_id}] 月度 {month[i]} 写入失败: {e}")
@@ -1069,38 +1102,44 @@ class DataFetcher:
                 for m_row in tou_data["months"]:
                     try:
                         m_row["user_name"] = user_name
+                        m_row["source"] = "calculated"
+                        if normalize_month(m_row.get("month")) is None:
+                            m_row["month"] = self._format_month(m_row.get("month"), page_year)
                         self.db.insert_monthly_data(m_row)
                     except Exception as e:
                         logging.debug(f"[{user_id}] 分时月度 {m_row.get('month')} 写入失败: {e}")
                 logging.info(f"[{user_id}] Vue state 分时月用电已写入 {len(tou_data['months'])} 条")
 
-            # 写入账单分时月用电量
+            # 写入账单分时月用电量（官方账单优先级最高）
             if bill_tou_data and bill_tou_data.get("month"):
                 try:
                     self.db.insert_monthly_data({
                         "month": bill_tou_data["month"],
                         "total_usage": bill_tou_data.get("usage"),
                         "total_charge": bill_tou_data.get("charge"),
-                        "valley_usage": bill_tou_data.get("valley_usage", 0),
-                        "flat_usage": bill_tou_data.get("flat_usage", 0),
-                        "peak_usage": bill_tou_data.get("peak_usage", 0),
-                        "tip_usage": bill_tou_data.get("tip_usage", 0),
+                        "valley_usage": bill_tou_data.get("valley_usage"),
+                        "flat_usage": bill_tou_data.get("flat_usage"),
+                        "peak_usage": bill_tou_data.get("peak_usage"),
+                        "tip_usage": bill_tou_data.get("tip_usage"),
                         "user_name": user_name,
+                        "source": "official",
                     })
                     logging.info(f"[{user_id}] 账单分时月度数据已写入: {bill_tou_data['month']}")
                 except Exception as e:
                     logging.warning(f"[{user_id}] 账单分时月度写入失败: {e}")
 
-            # 写入年度用电量
-            year = str(datetime.now().year)
+            # 写入年度用电量（DOM 方式）
+            # 1 月页面展示的是上一年数据，年度归属需要跟随页面
+            year = page_year
             if yearly_usage is not None or yearly_charge is not None:
                 try:
-                    year_data = {"year": year, "user_name": user_name}
-                    if yearly_usage is not None:
-                        year_data["total_usage"] = float(yearly_usage)
-                    if yearly_charge is not None:
-                        year_data["total_charge"] = float(yearly_charge)
-                    self.db.insert_yearly_data(year_data)
+                    self.db.insert_yearly_data({
+                        "year": year,
+                        "total_usage": to_float(yearly_usage),
+                        "total_charge": to_float(yearly_charge),
+                        "user_name": user_name,
+                        "source": "calculated",
+                    })
                     logging.info(f"[{user_id}] 年度用电量已写入: {year}")
                 except Exception as e:
                     logging.warning(f"[{user_id}] 年度用电量写入失败: {e}")
@@ -1110,13 +1149,30 @@ class DataFetcher:
                 try:
                     self.db.insert_yearly_data({
                         "year": tou_data["year"],
-                        "total_usage": tou_data.get("yearly_usage"),
-                        "total_charge": tou_data.get("yearly_charge"),
+                        "total_usage": to_float(tou_data.get("yearly_usage")),
+                        "total_charge": to_float(tou_data.get("yearly_charge")),
                         "user_name": user_name,
+                        "source": "calculated",
                     })
                     logging.info(f"[{user_id}] Vue state 年度数据已写入: {tou_data['year']}")
                 except Exception as e:
                     logging.warning(f"[{user_id}] Vue state 年度写入失败: {e}")
+
+            # 账单中的年度汇总（官方值）
+            if bill_tou_data and (bill_tou_data.get("year_usage") is not None
+                                  or bill_tou_data.get("year_charge") is not None):
+                try:
+                    bill_year = normalize_year(bill_tou_data.get("month")) or year
+                    self.db.insert_yearly_data({
+                        "year": bill_year,
+                        "total_usage": bill_tou_data.get("year_usage"),
+                        "total_charge": bill_tou_data.get("year_charge"),
+                        "user_name": user_name,
+                        "source": "official",
+                    })
+                    logging.info(f"[{user_id}] 账单年度汇总已写入: {bill_year}")
+                except Exception as e:
+                    logging.warning(f"[{user_id}] 账单年度汇总写入失败: {e}")
 
             # 数据清理
             self.db.cleanup_old_data()

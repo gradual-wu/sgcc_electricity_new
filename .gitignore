@@ -168,6 +168,8 @@ cython_debug/
 scripts/debug_fetch.py
 errors
 sgcc_cache.json
+data/
+.mqtt_legacy_cleaned_*
 debug_captcha_out
 debug_captcha_opencv
 homeassistant_sgcc_sensors

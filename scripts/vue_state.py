@@ -176,14 +176,13 @@ def _normalize_daily_row(row: dict[str, Any]) -> Optional[dict[str, Any]]:
     date = str(row.get("day") or "").strip()
     if not date:
         return None
-    total = _safe_float(row.get("dayElePq"), default=0.0)
     return {
         "date": date,
-        "total_usage": total,
-        "valley_usage": _safe_float(row.get("thisVPq"), default=0.0),
-        "flat_usage": _safe_float(row.get("thisNPq"), default=0.0),
-        "peak_usage": _safe_float(row.get("thisPPq"), default=0.0),
-        "tip_usage": _safe_float(row.get("thisTPq"), default=0.0),
+        "total_usage": _safe_float(row.get("dayElePq"), default=None),
+        "valley_usage": _safe_float(row.get("thisVPq"), default=None),
+        "flat_usage": _safe_float(row.get("thisNPq"), default=None),
+        "peak_usage": _safe_float(row.get("thisPPq"), default=None),
+        "tip_usage": _safe_float(row.get("thisTPq"), default=None),
     }
 
 

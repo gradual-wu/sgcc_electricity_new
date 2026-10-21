@@ -13,8 +13,7 @@
 - 选择 "Repositories"或"仓库"
   ![添加存储库入口](./img/repositories-menu.png)
 - 在弹出的对话框中输入sgcc electricity new存储库地址
-- 地址：https://github.com/ARC-MX/sgcc_electricity_new
-- 推荐使用国内源：[https://gitee.com/ARC-MX/sgcc_electricity_new](https://gitee.com/ARC-MX/sgcc_electricity_new)
+- 地址：https://github.com/gradual-wu/sgcc_electricity_new
 - 点击 "ADD" 或 "添加" 确认添加
   ![添加存储库地址](./img/add-repository.png)
 

@@ -1,8 +1,8 @@
 name: "SGCC Electricity"
-version: "v1.9.6"
+version: "v1.10.0"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
-url: "https://github.com/wuwweizn/sgcc_electricity_new"
+url: "https://github.com/gradual-wu/sgcc_electricity_new"
 arch:
   - aarch64
   - amd64
@@ -11,7 +11,7 @@ full_access: true
 startup: application
 boot: auto
 init: false
-image: "ghcr.io/wuwweizn/sgcc_electricity-{arch}"
+image: "ghcr.io/gradual-wu/sgcc_electricity-{arch}"
 map:
   # - addons:rw
   - config:rw
@@ -20,18 +20,37 @@ map:
     read_only: False
 options:
   PHONE_NUMBER: ""
-  PASSWORD: ""  
+  PASSWORD: ""
   IGNORE_USER_ID: "xxxx,xxxx"
-  ENABLE_DATABASE_STORAGE: false
+  USER_NAMES: ""
+  DB_TYPE: "NONE"
   DB_NAME: "homeassistant.db"
+  MYSQL_HOST: ""
+  MYSQL_USER: ""
+  MYSQL_PASSWORD: ""
+  MYSQL_DATABASE: "sgcc"
+  MYSQL_PORT: 3306
   HASS_URL: "http://homeassistant.local:8123/"
   HASS_TOKEN: ""
+  MQTT_HOST: "127.0.0.1"
+  MQTT_PORT: 1883
+  MQTT_USERNAME: ""
+  MQTT_PASSWORD: ""
+  MQTT_DISCOVERY_PREFIX: "homeassistant"
+  MQTT_STATE_PREFIX: "sgcc_electricity"
+  CLEANUP_LEGACY_REST_STATES: true
   JOB_START_TIME: "07:00"
   RETRY_WAIT_TIME_OFFSET_UNIT: 15
-  DATA_RETENTION_DAYS: 7
-  RECHARGE_NOTIFY: false
+  DATA_RETENTION_DAYS: 0
+  DAILY_FETCH_DAYS: 30
+  PUSH_TYPE: "None"
   BALANCE: 5.0
   PUSHPLUS_TOKEN: "xxxx,xxxx"
+  PUSH_URL: ""
+  PUSH_QRCODE_URL: ""
+  LOGIN_FALLBACK: "qrcode"
+  QR_CODE_LOGIN_WAIT_COUNT: 18
+  QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT: 10
   LLM_API_KEY: ""
   LLM_BASE_URL: ""
   LLM_MODEL: ""
@@ -39,16 +58,35 @@ schema:
   PHONE_NUMBER: str
   PASSWORD: password
   IGNORE_USER_ID: str
-  ENABLE_DATABASE_STORAGE: bool
+  USER_NAMES: str?
+  DB_TYPE: "list(NONE|SQLITE|MYSQL)"
   DB_NAME: str
+  MYSQL_HOST: str?
+  MYSQL_USER: str?
+  MYSQL_PASSWORD: password?
+  MYSQL_DATABASE: str?
+  MYSQL_PORT: int?
   HASS_URL: url
   HASS_TOKEN: str
+  MQTT_HOST: str?
+  MQTT_PORT: int?
+  MQTT_USERNAME: str?
+  MQTT_PASSWORD: password?
+  MQTT_DISCOVERY_PREFIX: str?
+  MQTT_STATE_PREFIX: str?
+  CLEANUP_LEGACY_REST_STATES: bool?
   JOB_START_TIME: str
   RETRY_WAIT_TIME_OFFSET_UNIT: int(2,30)
   DATA_RETENTION_DAYS: int
-  RECHARGE_NOTIFY: bool 
-  BALANCE: float 
+  DAILY_FETCH_DAYS: "list(7|30)"
+  PUSH_TYPE: "list(None|PUSHPLUS|URLPUSH)"
+  BALANCE: float
   PUSHPLUS_TOKEN: str
+  PUSH_URL: str?
+  PUSH_QRCODE_URL: str?
+  LOGIN_FALLBACK: "list(qrcode|None)"
+  QR_CODE_LOGIN_WAIT_COUNT: int(1,60)
+  QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT: int(2,30)
   LLM_API_KEY: password
   LLM_BASE_URL: str?
   LLM_MODEL: str?
