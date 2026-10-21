@@ -24,6 +24,7 @@
 | 验证码控件检测到隐藏的预加载 DOM 元素 | 改用 `visibility_of_element_located` 替代 `presence_of_element_located` |
 | 风控触发时自动切换二维码登录 | 检测到 RK001 → 自动切换二维码模式，通过 HA 持久通知展示二维码 |
 | 二维码无法送达（PushPlus 需要实名认证） | 改用 HA 自带的通知系统：图片保存至 `/config/www/`，HA 界面直接显示 |
+| 二维码通知只给文件路径、难以扫码 | 识别二维码内容后本地重新生成干净二维码，保存到 `HASS_WWW_DIR` 并在 HA 通知中直接显示 |
 | GitHub Actions 推送镜像权限不足 | 使用带 `packages: write` 的 `GITHUB_TOKEN`；组织策略不允许时改用 `CR_PAT` |
 | 旧版通过 HA REST API 逐个写 sensor | 改用 **MQTT Discovery**，自动创建带设备分组的实体 |
 | 峰谷电量只在日志里看到 | 新增日/月谷、平、峰、尖分时实体，并写入 MySQL |
@@ -37,6 +38,10 @@
 通过 Python Selenium 自动化获取国家电网官网的电费、电量数据，接入 Home Assistant 实体。登录时的腾讯点击/滑块验证码通过**大模型（LLM）视觉识别**自动解算，无需人工干预；若遭遇风控拦截则自动切换二维码登录并通过 **HA 通知**推送二维码图片。
 
 > 完整的数据抓取、数据库、阶梯计算、HA 发布和调度流程见 **[FLOW.md](FLOW.md)**。
+>
+> 二维码登录时，程序会从页面二维码图片中识别出字符串，在本机用 `qrcode` 重新生成干净的二维码，
+> 保存到 `HASS_WWW_DIR`（默认 `/config/www`），并在 HA 持久通知里用 `/local/sgcc_login_qr.png` 直接显示；
+> 同时附带 data URI 兜底。二维码内容不会发送到任何第三方服务。
 
 **提供以下 HA 实体（通过 MQTT Discovery 自动创建）：**
 
@@ -224,6 +229,7 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `PASSWORD` | 国网登录密码 |
 | `HASS_URL` | HA 地址，如 `http://homeassistant.local:8123/` |
 | `HASS_TOKEN` | HA 长期访问令牌（MQTT 接入后用于二维码通知和旧实体清理） |
+| `HASS_WWW_DIR` | 二维码图片保存目录，HA Add-on 默认 `/config/www` |
 | `MQTT_HOST` | Mosquitto broker 地址，HA Add-on 默认 `127.0.0.1` |
 | `MQTT_PORT` | broker 端口，默认 `1883` |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | Mosquitto 认证账号；官方 Mosquitto 加载项使用 HA 用户认证 |

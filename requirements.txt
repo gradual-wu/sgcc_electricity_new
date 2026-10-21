@@ -3,6 +3,8 @@ selenium==4.34.2
 schedule==1.2.1
 Pillow==10.1.0
 numpy==1.26.2
+qrcode==8.2
+opencv-python-headless==4.10.0.84
 mysql-connector-python==9.4.0
 paho-mqtt==2.1.0
 openai>=1.0.0

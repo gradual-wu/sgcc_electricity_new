@@ -380,6 +380,25 @@ db.ensure_connected(user_id)
 - SQLite：`SELECT 1`；
 - 失败时重新 `connect_user_db()`。
 
+### 3.8 二维码登录通知
+
+当密码登录被风控拦截、回退到二维码模式时：
+
+1. 从页面取出二维码图片（`data:image` base64 或元素截图）。
+2. `qr_utils.decode_qr_image()` 用本机 OpenCV 识别二维码里的字符串。
+3. `qr_utils.generate_qr_png()` 用 `qrcode` 重新生成一张干净的二维码 PNG。
+4. 保存到 `HASS_WWW_DIR`（默认 `/config/www`），HA 通过 `/local/sgcc_login_qr.png` 访问。
+5. 调用 HA `persistent_notification/create`，消息里同时包含：
+   - Markdown 图片：`![登录二维码](/local/sgcc_login_qr.png?t=...)`
+   - data URI `<img>` 兜底，避免 www 目录未映射时只看到文件路径。
+6. 如果二维码识别或重新生成失败，回退为页面原始截图，不影响扫码。
+
+安全说明：
+
+- 二维码内容（登录 token）只在本机处理，不发送到第三方二维码服务。
+- 日志只记录识别成功和字符串长度，不记录二维码内容。
+- 二维码文件保存在数据目录 `login_qr_code.png`，同时按需写入 `HASS_WWW_DIR`。
+
 ---
 
 ## 4. 年累计与阶梯计算口径
@@ -538,6 +557,7 @@ db.ensure_connected(user_id)
 | `FORCE_YEAR_BACKFILL` | `false` | 强制重新回补当年日数据 |
 | `TIER1_MAX` / `TIER2_MAX` | `2160` / `4200` | 阶梯边界 |
 | `PAGE_WAIT_TIME` | `10` | 数据页操作等待秒数 |
+| `HASS_WWW_DIR` | `/config/www` | 二维码图片保存目录，HA 通过 `/local/` 访问 |
 | `ENTITY_ID_STYLE` | `none` | `none` 无后缀 / `full` 完整户号 / `last4` 旧版后4位 |
 | `CLEANUP_LEGACY_ENTITY_IDS` | `true` | 切换风格时清理旧后4位 MQTT 实体 |
 | `DATA_RETENTION_DAYS` | `0` | 0=永久保留 |

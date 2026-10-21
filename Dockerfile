@@ -20,6 +20,7 @@ RUN apt-get --allow-releaseinfo-change update \
         jq fonts-noto-cjk tzdata \
         wget unzip ca-certificates \
         chromium chromium-driver \
+        libgl1 libglib2.0-0 \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \

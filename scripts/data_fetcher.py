@@ -411,13 +411,30 @@ class DataFetcher:
           logging.info('二维码图片源不是 base64 格式')
           img_screenshot = qrElement.screenshot_as_png
 
-        with open("/data/login_qr_code.png", "wb") as f:
+        from qr_utils import decode_qr_image, generate_qr_png
+
+        qr_text = decode_qr_image(img_screenshot)
+        if qr_text:
+            logging.info(f"已识别二维码内容（长度 {len(qr_text)}）")
+            regenerated = generate_qr_png(qr_text)
+            if regenerated:
+                img_screenshot = regenerated
+                logging.info("已根据二维码内容重新生成干净二维码")
+            else:
+                logging.warning("二维码重新生成失败，使用页面截图")
+        else:
+            logging.warning("未能识别二维码内容，使用页面截图")
+
+        from const import get_data_dir
+        qr_path = os.path.join(get_data_dir(), "login_qr_code.png")
+        os.makedirs(os.path.dirname(qr_path), exist_ok=True)
+        with open(qr_path, "wb") as f:
             f.write(img_screenshot)
-            logging.info("已将二维码保存到 /data/login_qr_code.png")
+            logging.info(f"已将二维码保存到 {qr_path}")
 
         from notify import UrlLoginQrCodeNotify
         notifyFunc = UrlLoginQrCodeNotify()
-        notifyFunc(img_screenshot, reason)
+        notifyFunc(img_screenshot, reason, qr_path)
         for i in range(1, self.QR_CODE_LOGIN_WAIT_COUNT + 1):
             logging.info(f'二维码登录等待检查[{self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT}] 次数[{i}]')
             time.sleep(self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT)

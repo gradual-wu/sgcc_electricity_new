@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.12.0"
+version: "v1.13.0"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -32,6 +32,7 @@ options:
   MYSQL_PORT: 3306
   HASS_URL: "http://homeassistant.local:8123/"
   HASS_TOKEN: ""
+  HASS_WWW_DIR: "/config/www"
   MQTT_HOST: "127.0.0.1"
   MQTT_PORT: 1883
   MQTT_USERNAME: ""
@@ -86,6 +87,7 @@ schema:
   MYSQL_PORT: int?
   HASS_URL: url
   HASS_TOKEN: str
+  HASS_WWW_DIR: str?
   MQTT_HOST: str?
   MQTT_PORT: int?
   MQTT_USERNAME: str?

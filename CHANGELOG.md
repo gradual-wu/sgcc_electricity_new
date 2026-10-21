@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.13.0] - 2026-10-21
+
+### Added
+
+- 二维码登录时识别二维码内容，并本地重新生成干净二维码，保存到 `HASS_WWW_DIR`（默认 `/config/www`）。
+- HA 持久通知直接显示 `/local/sgcc_login_qr.png`，并附带 data URI 兜底；二维码内容不发送到第三方。
+- 新增 `HASS_WWW_DIR` 加载项配置。
+
 ## [v1.12.0] - 2026-10-21
 
 ### Changed

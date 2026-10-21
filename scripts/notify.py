@@ -4,6 +4,7 @@ import logging
 import time
 import requests
 import io
+import base64
 
 class PushplusNotify(typ.NamedTuple):
 
@@ -42,8 +43,13 @@ class UrlPushNotify(typ.NamedTuple):
 
 class UrlLoginQrCodeNotify(typ.NamedTuple):
 
-    def __call__(self, qrcode: bytes, reason: str) -> bool:
+    def __call__(self, qrcode: bytes, reason: str, file_path: str = "") -> bool:
         sent = False
+        qr_b64 = base64.b64encode(qrcode).decode("ascii")
+        data_uri_image = (
+            f'<img src="data:image/png;base64,{qr_b64}" '
+            f'alt="登录二维码" width="240">'
+        )
 
         # 方式1：自定义 URL 推送（保留兼容）
         url = os.getenv("PUSH_QRCODE_URL")
@@ -71,10 +77,17 @@ class UrlLoginQrCodeNotify(typ.NamedTuple):
                     with open(qr_path, "wb") as f:
                         f.write(qrcode)
                     logging.info(f"二维码已保存到 {qr_path}")
-                    image_markdown = f"![登录二维码](/local/sgcc_login_qr.png?t={ts})"
+                    image_markdown = (
+                        f"![登录二维码](/local/sgcc_login_qr.png?t={ts})\n\n"
+                        f"{data_uri_image}"
+                    )
                 except Exception as e:
                     logging.warning(f"保存二维码到 HA www 目录失败: {e}")
-                    image_markdown = "二维码已保存到 /data/login_qr_code.png，请在容器内查看。"
+                    fallback_path = file_path or "/data/login_qr_code.png"
+                    image_markdown = (
+                        f"{data_uri_image}\n\n"
+                        f"二维码文件也保存在 `{fallback_path}`。"
+                    )
 
                 message = (
                     f"**触发原因**: {reason}\n\n"
@@ -107,5 +120,6 @@ class UrlLoginQrCodeNotify(typ.NamedTuple):
             logging.warning("HASS_URL 或 HASS_TOKEN 未配置，跳过 HA 通知")
 
         if not sent:
-            logging.warning("所有推送方式均失败，二维码已保存到 /data/login_qr_code.png")
+            fallback_path = file_path or "/data/login_qr_code.png"
+            logging.warning(f"所有推送方式均失败，二维码已保存到 {fallback_path}")
         return sent
