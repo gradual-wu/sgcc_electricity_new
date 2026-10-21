@@ -515,6 +515,7 @@ db.ensure_connected(user_id)
 | `electricity_charge_balance` | 电费余额 |
 | `prepay_balance` | 预付费余额/应交金额 |
 | `last_electricity_usage` | 最新日电量 |
+| `latest_data_date` | 最新日数据日期（判断国网数据延迟） |
 | `last_valley/flat/peak/tip_electricity_usage` | 最新日分时电量 |
 | `yearly_electricity_usage/charge` | 本年电量/电费 |
 | `month_electricity_usage/charge` | 最近一个月（优先官方账单） |

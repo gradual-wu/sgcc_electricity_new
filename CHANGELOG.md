@@ -1,5 +1,12 @@
 # Changelog
 
+## [v1.15.6] - 2026-10-21
+
+### Added
+
+- 新增 `sensor.latest_data_date`（`device_class: date`），状态是最新一条日数据的日期，便于判断国网数据延迟。
+- `last_electricity_usage` 等日实体已有 `last_daily_date` 属性；新传感器提供独立的日期状态，方便仪表盘和自动化直接使用。
+
 ## [v1.15.5] - 2026-10-21
 
 ### Added

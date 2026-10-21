@@ -48,6 +48,7 @@
 | 实体 | 说明 |
 |------|------|
 | `sensor.last_electricity_usage` | 最近一天用电量（kWh） |
+| `sensor.latest_data_date` | 最新日数据日期（用于判断国网数据延迟） |
 | `sensor.electricity_charge_balance` | 电费余额 / 上月应交电费（元） |
 | `sensor.yearly_electricity_usage` | 今年总用电量（kWh） |
 | `sensor.yearly_electricity_charge` | 今年总电费（元） |

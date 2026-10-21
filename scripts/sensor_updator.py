@@ -205,6 +205,18 @@ class SensorUpdator:
                 user_name,
                 daily_attributes,
             )
+            latest_date = normalize_date(last_daily_date)
+            if latest_date:
+                self._publish_sensor(
+                    user_id,
+                    "latest_data_date",
+                    latest_date,
+                    user_name,
+                    {
+                        "last_daily_date": latest_date,
+                        "daily_usage": last_daily_usage,
+                    },
+                )
             daily_tou = self._extract_daily_tou(tou_data, last_daily_date)
             for key, value in daily_tou.items():
                 self._publish_sensor(

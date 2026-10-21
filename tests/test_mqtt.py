@@ -146,6 +146,7 @@ def test_sensor_updator_publishes_balance_usage_and_tou(tmp_path, monkeypatch):
     daily = fake.state_payload(user_id, "last_electricity_usage")
     assert daily["state"] == 16.06
     assert daily["last_daily_date"] == yesterday
+    assert fake.state_payload(user_id, "latest_data_date")["state"] == yesterday
     assert fake.state_payload(user_id, "last_valley_electricity_usage")["state"] == 5.1
     assert fake.state_payload(user_id, "last_flat_electricity_usage")["state"] == 4.2
     assert fake.state_payload(user_id, "last_peak_electricity_usage")["state"] == 5.7
@@ -404,6 +405,7 @@ def test_sensor_updator_publishes_from_database(tmp_path, monkeypatch):
     daily = fake.state_payload(user_id, "last_electricity_usage")
     assert daily["state"] == 16.06
     assert daily["last_daily_date"] == yesterday
+    assert fake.state_payload(user_id, "latest_data_date")["state"] == yesterday
     assert fake.state_payload(user_id, "last_valley_electricity_usage")["state"] == 5.1
     assert fake.state_payload(user_id, "yearly_electricity_usage")["state"] == 556.0
 
@@ -426,7 +428,12 @@ def test_sensor_updator_publishes_from_database(tmp_path, monkeypatch):
 
 
 def test_all_sensor_specs_have_required_fields():
-    unitless = {"last_payment_date", "data_updated_at", "current_electricity_tier"}
+    unitless = {
+        "last_payment_date",
+        "data_updated_at",
+        "latest_data_date",
+        "current_electricity_tier",
+    }
     for key, spec in SENSOR_SPECS.items():
         assert spec["label"]
         if key not in unitless:

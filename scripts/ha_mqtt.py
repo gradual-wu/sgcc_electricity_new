@@ -45,6 +45,11 @@ SENSOR_SPECS: Dict[str, Dict[str, Any]] = {
         "icon": "mdi:lightning-bolt",
         "precision": 3,
     },
+    "latest_data_date": {
+        "label": "最新数据日期",
+        "device_class": "date",
+        "icon": "mdi:calendar-check",
+    },
     "yearly_electricity_usage": {
         "label": "本年电量",
         "unit": "kWh",
