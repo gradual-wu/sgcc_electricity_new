@@ -134,6 +134,8 @@ sequenceDiagram
 | 每月 1 号（随日常抓取） | 补上个月官方账单、交费记录、阶梯快照 | 是，仅一次 |
 | 最近缴费超过 `PAYMENT_FETCH_INTERVAL_DAYS` | 同步交费记录 | 是 |
 | 当年日数据覆盖不足 80% 或 `FORCE_YEAR_BACKFILL=true` | 全年日数据回补 | 是 |
+| `FILL_MISSING_DATA=true`（启动时） | 扫描数据库，只补缺失的日数据/账单/交费/阶梯 | 是，仅缺失部分 |
+| `FORCE_FULL_REFRESH=true`（启动时） | 全量重拉日数据/账单/交费/阶梯 | 是 |
 | 手动 `fetch_once.py` | 一次性抓取 + 发布 | 是 |
 | 手动 `db_status.py` | 查看/修复数据库、从数据库发布 | 否 |
 
@@ -556,6 +558,7 @@ db.ensure_connected(user_id)
 | `YEAR_BACKFILL_CHUNK_DAYS` | `30` | 全年回补分段天数（分段过大会漏天数） |
 | `FORCE_YEAR_BACKFILL` | `false` | 强制重新回补当年日数据 |
 | `FORCE_FULL_REFRESH` | `false` | 强制全量刷新日数据 + 官方账单 + 交费 + 阶梯；跑完改回 `false` |
+| `FILL_MISSING_DATA` | `false` | 只补缺失：扫描数据库缺口，只抓缺失数据；跑完改回 `false` |
 | `TIER1_MAX` / `TIER2_MAX` | `2160` / `4200` | 阶梯边界 |
 | `PAGE_WAIT_TIME` | `10` | 数据页操作等待秒数 |
 | `HASS_WWW_DIR` | `/config/www` | 二维码图片保存目录，HA 通过 `/local/` 访问 |
@@ -573,6 +576,24 @@ db.ensure_connected(user_id)
 
 ```bash
 python scripts/db_status.py --user-id 1234567890123
+```
+
+只扫描缺失数据（不访问国网）：
+
+```bash
+python scripts/db_status.py --user-id 1234567890123 --missing
+```
+
+输出示例：
+
+```json
+{
+  "daily_missing_ranges": [["2026-09-28", "2026-10-13"]],
+  "daily_missing_count": 16,
+  "missing_bills": ["2026-01", "...", "2026-09"],
+  "payment_missing": true,
+  "tier_snapshot_missing": true
+}
 ```
 
 修复当月月度/年度汇总（只写数据库）：

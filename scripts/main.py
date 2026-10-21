@@ -79,10 +79,14 @@ def main():
     # 每5分钟从数据库重新发布一次数据，防止 HA 重启后数据丢失
     schedule.every(5).minutes.do(republish_or_fetch, updator, fetcher)
 
-    # 启动时先从数据库恢复；数据库没有数据或要求全量刷新时才访问国家电网
+    # 启动时先从数据库恢复；数据库没有数据、要求全量刷新或补缺时才访问国家电网
     force_full_refresh = os.getenv("FORCE_FULL_REFRESH", "false").lower() == "true"
+    fill_missing_data = os.getenv("FILL_MISSING_DATA", "false").lower() == "true"
     if force_full_refresh:
         logging.info("FORCE_FULL_REFRESH=true，启动时立即执行全年数据全量刷新...")
+        run_task(fetcher, updator)
+    elif fill_missing_data:
+        logging.info("FILL_MISSING_DATA=true，启动时立即扫描数据库并补齐缺失数据...")
         run_task(fetcher, updator)
     elif not updator.publish_all_from_db(fetcher.db):
         logging.info("数据库中没有可发布数据，正在从国家电网获取数据...")

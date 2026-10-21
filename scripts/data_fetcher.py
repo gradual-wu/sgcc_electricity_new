@@ -69,6 +69,7 @@ class DataFetcher:
                     self._user_name_map[uid.strip()] = name.strip()
         self._backfilled_years = set()
         self._full_refreshed_users = set()
+        self._filled_missing_users = set()
         self._init_db()
 
     def _init_db(self):
@@ -1655,6 +1656,74 @@ class DataFetcher:
             cursor += timedelta(days=1)
         return gaps
 
+    def _fill_daily_gaps(self, driver, user_id: str, userid_index: int, year: int) -> int:
+        """只补数据库里缺失的日数据和缺失的 calculated 月度行，不重拉已有数据。"""
+        today = date.today()
+        start_text = os.getenv("YEAR_BACKFILL_START", f"{year}-01-01")
+        try:
+            start = date.fromisoformat(start_text)
+        except ValueError:
+            start = date(year, 1, 1)
+        end = today - timedelta(days=1)
+        if end < start:
+            return 0
+
+        gaps = self._daily_gaps(start, end)
+        if gaps:
+            logging.info(
+                f"[{user_id}] FILL_MISSING_DATA 日数据缺口: "
+                f"{[(str(a), str(b)) for a, b in gaps]}"
+            )
+        total_rows = 0
+        touched_months = set()
+        for gap_start, gap_end in gaps:
+            rows = self._fetch_daily_range(
+                driver, user_id, userid_index, gap_start.isoformat(), gap_end.isoformat()
+            )
+            self.db.ensure_connected(user_id)
+            for row in rows:
+                if self.db.insert_daily_data(row):
+                    touched_months.add(row["date"][:7])
+                    total_rows += 1
+
+        # 有些月份有日数据但没有月度行（例如当月），按日数据补一条 calculated
+        self.db.ensure_connected(user_id)
+        for month_no in range(1, today.month + 1):
+            month_key = f"{year}-{month_no:02d}"
+            if self.db.has_official_bill(month_key):
+                continue
+            month_start = date(year, month_no, 1)
+            if month_no == 12:
+                month_end = date(year, 12, 31)
+            else:
+                month_end = date(year, month_no + 1, 1) - timedelta(days=1)
+            summary = self.db.get_daily_summary(
+                month_start.isoformat(), min(month_end, end).isoformat()
+            )
+            if not summary.get("count"):
+                continue
+            existing = self.db.get_monthly_usage_row(month_key)
+            if existing is None or existing.get("total_usage") is None:
+                self.db.sync_calculated_month_from_daily(month_key)
+                touched_months.add(month_key)
+
+        for month in sorted(touched_months):
+            self.db.sync_calculated_month_from_daily(month)
+        self.db.refresh_yearly_from_monthly(str(year))
+
+        remaining = self._daily_gaps(start, end)
+        if remaining:
+            missing_days = sum((gap_end - gap_start).days + 1 for gap_start, gap_end in remaining)
+            logging.warning(
+                f"[{user_id}] FILL_MISSING_DATA 后仍有 {missing_days} 天未补齐: "
+                f"{[(str(a), str(b)) for a, b in remaining]}"
+            )
+        logging.info(
+            f"[{user_id}] FILL_MISSING_DATA 完成: 补日数据 {total_rows} 条，"
+            f"涉及月份 {sorted(touched_months)}"
+        )
+        return total_rows
+
     def _closed_bill_months(self, year: int) -> list[str]:
         today = date.today()
         last_closed = today.replace(day=1) - timedelta(days=1)
@@ -1689,13 +1758,30 @@ class DataFetcher:
             os.getenv("FORCE_FULL_REFRESH", "false").lower() == "true"
             and user_id not in self._full_refreshed_users
         )
+        fill_missing = (
+            os.getenv("FILL_MISSING_DATA", "false").lower() == "true"
+            and not force_full
+            and user_id not in self._filled_missing_users
+        )
         if force_full:
             logging.info(
                 f"[{user_id}] FORCE_FULL_REFRESH=true：本次执行全年日数据、官方账单、交费记录、阶梯全量刷新"
             )
+        elif fill_missing:
+            logging.info(f"[{user_id}] FILL_MISSING_DATA=true：扫描数据库，只补缺失数据")
         try:
-            if force_full or os.getenv("YEAR_BACKFILL_ENABLED", "true").lower() == "true":
-                if force_full or self._year_backfill_needed(year):
+            if force_full:
+                try:
+                    self._backfill_year(driver, user_id, userid_index, year)
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 年度日数据回补失败: {exc}")
+            elif fill_missing:
+                try:
+                    self._fill_daily_gaps(driver, user_id, userid_index, year)
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 缺失日数据补齐失败: {exc}")
+            elif os.getenv("YEAR_BACKFILL_ENABLED", "true").lower() == "true":
+                if self._year_backfill_needed(year):
                     try:
                         self._backfill_year(driver, user_id, userid_index, year)
                     except Exception as exc:
@@ -1772,6 +1858,11 @@ class DataFetcher:
                 self._full_refreshed_users.add(user_id)
                 logging.info(
                     f"[{user_id}] FORCE_FULL_REFRESH 全量刷新完成；请把配置设回 false，避免下次重启再次全量抓取"
+                )
+            elif fill_missing:
+                self._filled_missing_users.add(user_id)
+                logging.info(
+                    f"[{user_id}] FILL_MISSING_DATA 完成；请把配置设回 false，避免下次重启再次扫描补缺"
                 )
         finally:
             self.db.close_connect()

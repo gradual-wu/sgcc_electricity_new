@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.14.0"
+version: "v1.15.0"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -63,6 +63,7 @@ options:
   YEAR_BACKFILL_CHUNK_DAYS: 30
   FORCE_YEAR_BACKFILL: false
   FORCE_FULL_REFRESH: false
+  FILL_MISSING_DATA: false
   PUSH_TYPE: "None"
   BALANCE: 5.0
   PUSHPLUS_TOKEN: "xxxx,xxxx"
@@ -118,6 +119,7 @@ schema:
   YEAR_BACKFILL_CHUNK_DAYS: int?
   FORCE_YEAR_BACKFILL: bool?
   FORCE_FULL_REFRESH: bool?
+  FILL_MISSING_DATA: bool?
   PUSH_TYPE: "list(None|PUSHPLUS|URLPUSH)"
   BALANCE: float
   PUSHPLUS_TOKEN: str

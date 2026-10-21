@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import dotenv
 
@@ -101,9 +101,70 @@ def show_user(db, user_id, repair=False):
         db.close_connect()
 
 
+def _closed_months(year: int) -> list[str]:
+    today = date.today()
+    last_closed = today.replace(day=1) - timedelta(days=1)
+    months = []
+    cursor = date(year, 1, 1)
+    while cursor <= last_closed:
+        months.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    if last_closed.year < year:
+        months.insert(0, last_closed.strftime("%Y-%m"))
+    return list(dict.fromkeys(months))
+
+
+def _group_dates(dates: list[str]) -> list[list[str]]:
+    groups: list[list[str]] = []
+    for text in dates:
+        current = date.fromisoformat(text)
+        if groups and current == date.fromisoformat(groups[-1][1]) + timedelta(days=1):
+            groups[-1][1] = text
+        else:
+            groups.append([text, text])
+    return groups
+
+
+def show_missing(db, user_id: str) -> None:
+    if not db.connect_user_db(user_id):
+        print(f"[{user_id}] 数据库连接失败")
+        return
+    try:
+        today = date.today()
+        start = date(today.year, 1, 1)
+        end = today - timedelta(days=1)
+        present = db.get_daily_dates(start.isoformat(), end.isoformat())
+        missing = []
+        cursor = start
+        while cursor <= end:
+            if cursor.isoformat() not in present:
+                missing.append(cursor.isoformat())
+            cursor += timedelta(days=1)
+        missing_bills = [
+            month for month in _closed_months(today.year)
+            if not db.has_official_bill(month)
+        ]
+        payment = db.get_latest_payment()
+        tier = db.get_latest_tier_snapshot()
+        print(f"\n===== {user_id} 缺失数据 =====")
+        print(json.dumps(_jsonable({
+            "daily_missing_ranges": _group_dates(missing),
+            "daily_missing_count": len(missing),
+            "missing_bills": missing_bills,
+            "payment_missing": payment is None,
+            "tier_snapshot_missing": (
+                tier is None
+                or str(tier.get("snapshot_date") or "")[:7] != today.strftime("%Y-%m")
+            ),
+        }), ensure_ascii=False))
+    finally:
+        db.close_connect()
+
+
 def main():
     parser = argparse.ArgumentParser(description="查看/修复数据库并从数据库发布 HA")
     parser.add_argument("--user-id", help="只处理指定户号")
+    parser.add_argument("--missing", action="store_true", help="只扫描缺失的日数据/账单/交费/阶梯")
     parser.add_argument("--repair", action="store_true", help="用日数据刷新当月月度与年度汇总")
     parser.add_argument("--publish", action="store_true", help="从数据库推送 HA")
     args = parser.parse_args()
@@ -127,7 +188,10 @@ def main():
         user_ids = [args.user_id]
 
     for user_id in user_ids:
-        show_user(db, user_id, repair=args.repair)
+        if args.missing:
+            show_missing(db, user_id)
+        else:
+            show_user(db, user_id, repair=args.repair)
 
     if args.publish:
         updator = SensorUpdator()

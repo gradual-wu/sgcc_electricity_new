@@ -132,6 +132,7 @@ python scripts/fetch_once.py --force-backfill
 - **抓取**：只负责访问国网并把数据写入 MySQL，不直接推送 HA。
 - **日常抓取**：只核对最近 `DAILY_RECONCILE_DAYS`（默认 7）天；首次或 `--force-backfill` 才按 90 天分段回补当年日数据。
 - **每月 1 号**：检查并抓取上个月官方账单；账单未出时后续运行会重试。交费记录和官方阶梯按 `PAYMENT_FETCH_INTERVAL_DAYS` / 每月 1 号控制，避免每天重复访问。
+- **补缺模式**：`FILL_MISSING_DATA=true` 时先扫描数据库，只抓缺失的日数据/官方账单/交费/阶梯，不重拉已有数据；`FORCE_FULL_REFRESH=true` 才是真正全量重拉。
 - **HA 发布**：`SensorUpdator.publish_all_from_db()` 只从 `sg_*` 表读取数据并发布 MQTT，每 5 分钟重发一次；不依赖页面抓取。
 - **不要反复重跑抓取**：频繁登录/抓取会触发国网风控。日常只需要定时任务；排查数据优先用下面的只读工具。
 
@@ -139,6 +140,7 @@ python scripts/fetch_once.py --force-backfill
 
 ```bash
 python scripts/db_status.py --user-id 1234567890123
+python scripts/db_status.py --user-id 1234567890123 --missing
 python scripts/db_status.py --user-id 1234567890123 --repair
 python scripts/db_status.py --user-id 1234567890123 --publish
 ```
@@ -249,6 +251,7 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `YEAR_BACKFILL_ENABLED` / `FORCE_YEAR_BACKFILL` | 是否允许/强制全年日数据回补 |
 | `YEAR_BACKFILL_CHUNK_DAYS` | 全年回补分段天数，默认 `30` |
 | `FORCE_FULL_REFRESH` | 强制全量刷新：全年日数据 + 官方账单 + 交费记录 + 阶梯快照；启动时立即执行，跑完请改回 `false` |
+| `FILL_MISSING_DATA` | 只补缺失：扫描数据库缺口，只抓缺失的日数据/账单/交费/阶梯；启动时立即执行，跑完请改回 `false` |
 | `LLM_API_KEY` | 大模型 API Key |
 | `LLM_BASE_URL` | 大模型接口地址（火山引擎留空使用默认值） |
 | `LLM_MODEL` | 模型名称，如 `ep-2025xxxxxx-xxxxx`（火山引擎接入点 ID） |
