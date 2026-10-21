@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.11.0"
+version: "v1.12.0"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -38,6 +38,8 @@ options:
   MQTT_PASSWORD: ""
   MQTT_DISCOVERY_PREFIX: "homeassistant"
   MQTT_STATE_PREFIX: "sgcc_electricity"
+  ENTITY_ID_STYLE: "none"
+  CLEANUP_LEGACY_ENTITY_IDS: true
   CLEANUP_LEGACY_REST_STATES: true
   JOB_START_TIME: "07:00"
   RETRY_WAIT_TIME_OFFSET_UNIT: 15
@@ -90,6 +92,8 @@ schema:
   MQTT_PASSWORD: password?
   MQTT_DISCOVERY_PREFIX: str?
   MQTT_STATE_PREFIX: str?
+  ENTITY_ID_STYLE: "list(none|full|last4)?"
+  CLEANUP_LEGACY_ENTITY_IDS: bool?
   CLEANUP_LEGACY_REST_STATES: bool?
   JOB_START_TIME: str
   RETRY_WAIT_TIME_OFFSET_UNIT: int(2,30)

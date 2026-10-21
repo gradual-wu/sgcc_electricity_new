@@ -193,12 +193,16 @@ sequenceDiagram
 ### 1.8 多户号与多用户
 
 - 每个户号对应一个 HA 设备，设备标识 `sgcc_electricity_<完整户号>`。
-- 实体 ID 后缀沿用旧版习惯，取户号后 4 位：`sensor.<key>_<后4位>`。
+- 实体 ID 风格由 `ENTITY_ID_STYLE` 控制：
+  - `none`（默认）：`sensor.last_electricity_usage`，不带户号后缀，适合只启用一个户号；
+  - `full`：`sensor.last_electricity_usage_<完整户号>`，多户号时保证唯一；
+  - `last4`：`sensor.last_electricity_usage_<后4位>`，兼容旧版实体。
 - 所有实体状态 JSON 带：
   - `user_id`：完整户号；
   - `user_name`：`USER_NAMES` 中的友好名称。
 - 设备详情 `serial_number` 也是完整户号，便于在 HA 中筛选。
 - `IGNORE_USER_ID` 控制不抓取/不推送的户号；`USER_NAMES` 只负责命名，不改变抓取范围。
+- 从 `last4` 切换到其它风格时，`CLEANUP_LEGACY_ENTITY_IDS=true` 会自动删除旧的后 4 位 MQTT Discovery 配置。
 
 ### 1.9 扩展点与限制
 
@@ -534,6 +538,8 @@ db.ensure_connected(user_id)
 | `FORCE_YEAR_BACKFILL` | `false` | 强制重新回补当年日数据 |
 | `TIER1_MAX` / `TIER2_MAX` | `2160` / `4200` | 阶梯边界 |
 | `PAGE_WAIT_TIME` | `10` | 数据页操作等待秒数 |
+| `ENTITY_ID_STYLE` | `none` | `none` 无后缀 / `full` 完整户号 / `last4` 旧版后4位 |
+| `CLEANUP_LEGACY_ENTITY_IDS` | `true` | 切换风格时清理旧后4位 MQTT 实体 |
 | `DATA_RETENTION_DAYS` | `0` | 0=永久保留 |
 | `IGNORE_USER_ID` | - | 跳过不抓取的户号 |
 | `USER_NAMES` | - | 户号友好名称 |

@@ -42,27 +42,27 @@
 
 | 实体 | 说明 |
 |------|------|
-| `sensor.last_electricity_usage_xxxx` | 最近一天用电量（kWh） |
-| `sensor.electricity_charge_balance_xxxx` | 电费余额 / 上月应交电费（元） |
-| `sensor.yearly_electricity_usage_xxxx` | 今年总用电量（kWh） |
-| `sensor.yearly_electricity_charge_xxxx` | 今年总电费（元） |
-| `sensor.month_electricity_usage_xxxx` | 最近一月用电量（kWh） |
-| `sensor.month_electricity_charge_xxxx` | 上月总电费（元） |
-| `sensor.last_valley_electricity_usage_xxxx` | 最近一天谷时电量（kWh） |
-| `sensor.last_flat_electricity_usage_xxxx` | 最近一天平时电量（kWh） |
-| `sensor.last_peak_electricity_usage_xxxx` | 最近一天峰时电量（kWh） |
-| `sensor.last_tip_electricity_usage_xxxx` | 最近一天尖时电量（kWh） |
-| `sensor.month_valley_usage_xxxx` | 当月谷时用电量（kWh） |
-| `sensor.month_flat_usage_xxxx` | 当月平时用电量（kWh） |
-| `sensor.month_peak_usage_xxxx` | 当月峰时用电量（kWh） |
-| `sensor.month_tip_usage_xxxx` | 当月尖时用电量（kWh） |
-| `sensor.prepay_balance_xxxx` | 预付费余额 / 应交金额（元） |
-| `sensor.last_payment_amount_xxxx` | 上次缴费金额（元） |
-| `sensor.last_payment_date_xxxx` | 上次缴费时间 |
-| `sensor.current_electricity_tier_xxxx` | 当前阶梯（1/2/3） |
-| `sensor.current_tier_usage_xxxx` | 当前阶梯累计电量（kWh） |
-| `sensor.current_tier_remaining_xxxx` | 当前阶梯剩余电量（kWh） |
-| `sensor.data_updated_at_xxxx` | 数据更新时间（该户号最后一次成功写库时间） |
+| `sensor.last_electricity_usage` | 最近一天用电量（kWh） |
+| `sensor.electricity_charge_balance` | 电费余额 / 上月应交电费（元） |
+| `sensor.yearly_electricity_usage` | 今年总用电量（kWh） |
+| `sensor.yearly_electricity_charge` | 今年总电费（元） |
+| `sensor.month_electricity_usage` | 最近一月用电量（kWh） |
+| `sensor.month_electricity_charge` | 上月总电费（元） |
+| `sensor.last_valley_electricity_usage` | 最近一天谷时电量（kWh） |
+| `sensor.last_flat_electricity_usage` | 最近一天平时电量（kWh） |
+| `sensor.last_peak_electricity_usage` | 最近一天峰时电量（kWh） |
+| `sensor.last_tip_electricity_usage` | 最近一天尖时电量（kWh） |
+| `sensor.month_valley_usage` | 当月谷时用电量（kWh） |
+| `sensor.month_flat_usage` | 当月平时用电量（kWh） |
+| `sensor.month_peak_usage` | 当月峰时用电量（kWh） |
+| `sensor.month_tip_usage` | 当月尖时用电量（kWh） |
+| `sensor.prepay_balance` | 预付费余额 / 应交金额（元） |
+| `sensor.last_payment_amount` | 上次缴费金额（元） |
+| `sensor.last_payment_date` | 上次缴费时间 |
+| `sensor.current_electricity_tier` | 当前阶梯（1/2/3） |
+| `sensor.current_tier_usage` | 当前阶梯累计电量（kWh） |
+| `sensor.current_tier_remaining` | 当前阶梯剩余电量（kWh） |
+| `sensor.data_updated_at` | 数据更新时间（该户号最后一次成功写库时间） |
 
 > 阶梯按年度累计动态计算：历史月份优先使用官方月度账单（缺失时用日数据汇总），
 > 当月使用实时日用电量累加。默认边界为第一阶梯 0-2160、第二阶梯 2161-4200、
@@ -74,13 +74,17 @@
 >
 > 交费记录、官方月度账单（含分时电量、本月电量/电费和阶梯字段）和阶梯快照分别保存在
 > MySQL 的 `sg_payments`、`sg_monthly_bill`、`sg_tier_snapshot` 表；每个户号最后一次
-> 成功写库时间保存在 `sg_users.data_updated_at`，并推送为 `sensor.data_updated_at_xxxx`。
+> 成功写库时间保存在 `sg_users.data_updated_at`，并推送为 `sensor.data_updated_at`。
 > 首次运行会回补当年日用电量和缺失的官方账单，`DATA_RETENTION_DAYS=0` 时永久保留。
 
-> 原有 6 个实体 ID 与旧版 REST API 创建的实体保持一致，升级后原有仪表盘/自动化无需修改；
-> 新增的日/月分时实体沿用 ha-95598 的命名风格。
-> 程序首次启动时会自动删除旧版 REST 创建的同名状态（旧实体不在 HA 实体注册表中，
-> 不删除会导致 MQTT 实体被重命名为 `*_2`）。
+> 实体 ID 风格由 `ENTITY_ID_STYLE` 控制：
+>
+> - `none`（默认）：`sensor.last_electricity_usage`，不带户号后缀，适合只启用一个户号；
+> - `full`：`sensor.last_electricity_usage_1234567890123`，多户号时保证唯一；
+> - `last4`：`sensor.last_electricity_usage_0123`，兼容旧版实体。
+>
+> 从 `last4` 切换到其它风格时，`CLEANUP_LEGACY_ENTITY_IDS=true` 会自动删除旧的后 4 位 MQTT 实体配置。
+> 旧版 REST 状态也会在首次启动时清理，避免同名实体被重命名为 `*_2`。
 >
 > 月度分时电量优先使用官方账单数据；当月账单未出时，用当月已获取的日数据累加，
 > 实体属性 `source` 会显示 `official` 或 `daily_sum`。
@@ -225,11 +229,18 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | Mosquitto 认证账号；官方 Mosquitto 加载项使用 HA 用户认证 |
 | `MQTT_DISCOVERY_PREFIX` | HA MQTT Discovery 前缀，默认 `homeassistant` |
 | `MQTT_STATE_PREFIX` | 状态 topic 前缀，默认 `sgcc_electricity` |
+| `ENTITY_ID_STYLE` | 实体 ID 风格：`none`（默认，无后缀）/ `full`（完整户号）/ `last4`（旧版后4位） |
+| `CLEANUP_LEGACY_ENTITY_IDS` | 切换实体 ID 风格时自动清理旧的后 4 位 MQTT 实体，默认 `true` |
 | `DB_TYPE` | `NONE` / `SQLITE` / `MYSQL`，长期存储推荐 `MYSQL` |
 | `MYSQL_HOST` / `MYSQL_PORT` | MySQL 地址和端口 |
 | `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | MySQL 账号、密码、库名 |
 | `DATA_RETENTION_DAYS` | 日数据和余额历史保留天数；`0` 表示永久保留（推荐） |
-| `DAILY_FETCH_DAYS` | 每次拉取的日用电量天数，`7` 或 `30`，建议 `30` |
+| `DAILY_FETCH_DAYS` | 每次拉取的日用电量天数，`7` 或 `30`，日常建议 `7` |
+| `DAILY_RECONCILE_DAYS` | 日常写库只核对最近多少天，默认 `7` |
+| `PAYMENT_FETCH_INTERVAL_DAYS` | 交费记录同步间隔，默认 `7` 天；每月 1 号总会同步 |
+| `PAGE_WAIT_TIME` | 数据页操作等待秒数，默认 `10` |
+| `TIER1_MAX` / `TIER2_MAX` | 阶梯边界，默认 `2160` / `4200` |
+| `YEAR_BACKFILL_ENABLED` / `FORCE_YEAR_BACKFILL` | 是否允许/强制全年日数据回补 |
 | `LLM_API_KEY` | 大模型 API Key |
 | `LLM_BASE_URL` | 大模型接口地址（火山引擎留空使用默认值） |
 | `LLM_MODEL` | 模型名称，如 `ep-2025xxxxxx-xxxxx`（火山引擎接入点 ID） |
@@ -307,10 +318,10 @@ template sensor。程序启动后，HA 的「设置 → 设备与服务 → MQTT
 实体 ID 与旧版一致，例如：
 
 ```
-sensor.last_electricity_usage_xxxx
-sensor.last_valley_electricity_usage_xxxx
-sensor.month_peak_usage_xxxx
-sensor.electricity_charge_balance_xxxx
+sensor.last_electricity_usage
+sensor.last_valley_electricity_usage
+sensor.month_peak_usage
+sensor.electricity_charge_balance
 ```
 
 MQTT topic 规则：
@@ -395,13 +406,13 @@ type: vertical-stack
 cards:
   - type: custom:mini-graph-card
     entities:
-      - entity: sensor.last_electricity_usage_xxxx
+      - entity: sensor.last_electricity_usage
         name: 国网每日用电量
         aggregate_func: first
         show_state: true
         show_points: true
         icon: mdi:lightning-bolt-outline
-      - entity: sensor.electricity_charge_balance_xxxx
+      - entity: sensor.electricity_charge_balance
         name: 电费余额
         aggregate_func: first
         show_state: true

@@ -194,6 +194,7 @@ class HaMqttPublisher:
         availability_topic: str = "",
         device_manufacturer: str = "SGCC Electricity New",
         device_model: str = "sgcc_electricity_new",
+        entity_id_style: str = "none",
     ) -> None:
         self.mqtt = mqtt_publisher
         self.discovery_prefix = (discovery_prefix or "homeassistant").strip("/")
@@ -201,14 +202,20 @@ class HaMqttPublisher:
         self.availability_topic = (availability_topic or "").strip()
         self.device_manufacturer = device_manufacturer
         self.device_model = device_model
+        self.entity_id_style = (entity_id_style or "none").strip().lower()
+        if self.entity_id_style not in ("none", "full", "last4"):
+            self.entity_id_style = "none"
         self._published_discovery: set[str] = set()
 
     # ------------------------------------------------------------------
     # topics
     # ------------------------------------------------------------------
-    @staticmethod
-    def sensor_object_id(sensor_key: str, user_id: str) -> str:
-        return f"{sensor_key}_{str(user_id)[-4:]}"
+    def sensor_object_id(self, sensor_key: str, user_id: str) -> str:
+        if self.entity_id_style == "full":
+            return f"{sensor_key}_{user_id}"
+        if self.entity_id_style == "last4":
+            return f"{sensor_key}_{str(user_id)[-4:]}"
+        return sensor_key
 
     def state_topic(self, sensor_key: str, user_id: str) -> str:
         return f"{self.state_prefix}/{user_id}/{sensor_key}/state"
@@ -318,3 +325,16 @@ class HaMqttPublisher:
     def remove_user_sensors(self, user_id: str) -> None:
         for sensor_key in SENSOR_SPECS:
             self.remove_sensor(sensor_key, user_id)
+
+    def remove_legacy_last4_sensors(self, user_id: str) -> None:
+        """删除旧版“后4位”实体 ID 的 Discovery 配置。
+
+        状态 topic 与实体 ID 无关，不需要删除；只清空旧 Discovery 配置，
+        HA 会自动移除旧实体，随后由新的完整户号实体接管同一个状态 topic。
+        """
+        last4 = str(user_id)[-4:]
+        for sensor_key in SENSOR_SPECS:
+            legacy_topic = (
+                f"{self.discovery_prefix}/sensor/{sensor_key}_{last4}/config"
+            )
+            self.mqtt.publish(legacy_topic, "", retain=True)

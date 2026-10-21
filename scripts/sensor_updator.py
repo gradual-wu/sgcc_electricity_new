@@ -68,8 +68,10 @@ class SensorUpdator:
             discovery_prefix=self.discovery_prefix,
             state_prefix=self.state_prefix,
             availability_topic=self.availability_topic,
+            entity_id_style=os.getenv("ENTITY_ID_STYLE", "none"),
         )
         self._cleaned_legacy_users = set()
+        self._cleaned_legacy_entity_users = set()
         self._init_balance_notify()
 
     # ------------------------------------------------------------------
@@ -747,6 +749,32 @@ class SensorUpdator:
         except Exception as e:
             logging.debug(f"写入旧实体清理标记失败: {e}")
 
+    def _cleanup_legacy_entity_ids(self, user_id: str):
+        """从旧版“后4位”实体 ID 迁移到完整户号时，删除旧 Discovery 配置。"""
+        if getattr(self.ha, "entity_id_style", "none") == "last4":
+            return
+        if os.getenv("CLEANUP_LEGACY_ENTITY_IDS", "true").lower() != "true":
+            return
+        if user_id in self._cleaned_legacy_entity_users:
+            return
+        self._cleaned_legacy_entity_users.add(user_id)
+
+        marker = os.path.join(
+            os.path.dirname(os.path.abspath(self._get_cache_file())),
+            f".mqtt_entity_id_cleaned_{user_id}",
+        )
+        if os.path.exists(marker):
+            return
+
+        self.ha.remove_legacy_last4_sensors(user_id)
+        try:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            with open(marker, "w") as f:
+                f.write(datetime.now().isoformat())
+        except Exception as exc:
+            logging.debug(f"写入实体 ID 迁移标记失败: {exc}")
+        logging.info(f"[{user_id}] 已清理旧版后 4 位 MQTT 实体配置")
+
     def _publish_sensor(
         self,
         user_id: str,
@@ -758,6 +786,7 @@ class SensorUpdator:
         if value is None:
             return
         self._cleanup_legacy_rest_states(user_id)
+        self._cleanup_legacy_entity_ids(user_id)
         if self.ha.publish_sensor(
             sensor_key,
             user_id,

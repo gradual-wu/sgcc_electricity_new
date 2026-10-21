@@ -29,10 +29,14 @@ class FakeMqttPublisher:
         return None
 
     def discovery_payload(self, user_id, sensor_key):
-        object_id = f"{sensor_key}_{user_id[-4:]}"
-        topic = f"homeassistant/sensor/{object_id}/config"
+        state_topic = f"sgcc_electricity/{user_id}/{sensor_key}/state"
         for published_topic, payload, _ in reversed(self.published):
-            if published_topic == topic:
+            if (
+                published_topic.startswith("homeassistant/")
+                and published_topic.endswith("/config")
+                and isinstance(payload, dict)
+                and payload.get("state_topic") == state_topic
+            ):
                 return payload
         return None
 
@@ -41,6 +45,8 @@ def _build_updator(tmp_path, monkeypatch):
     monkeypatch.setenv("MQTT_DISCOVERY_PREFIX", "homeassistant")
     monkeypatch.setenv("MQTT_STATE_PREFIX", "sgcc_electricity")
     monkeypatch.setenv("CLEANUP_LEGACY_REST_STATES", "false")
+    monkeypatch.setenv("CLEANUP_LEGACY_ENTITY_IDS", "false")
+    monkeypatch.setenv("ENTITY_ID_STYLE", "none")
     monkeypatch.setenv("PUSH_TYPE", "None")
     fake = FakeMqttPublisher()
     updator = SensorUpdator(mqtt_publisher=fake, cache_file=str(tmp_path / "cache.json"))
@@ -49,7 +55,9 @@ def _build_updator(tmp_path, monkeypatch):
 
 def test_ha_discovery_payload_uses_legacy_entity_ids():
     fake = FakeMqttPublisher()
-    publisher = HaMqttPublisher(fake, availability_topic="sgcc_electricity/status")
+    publisher = HaMqttPublisher(
+        fake, availability_topic="sgcc_electricity/status", entity_id_style="last4"
+    )
     payload = publisher.build_discovery_payload(
         "last_electricity_usage", "1234567890123", user_name="家庭用电"
     )
@@ -68,6 +76,29 @@ def test_ha_discovery_payload_uses_legacy_entity_ids():
     )
     assert month_payload["state_class"] == "measurement"
     assert "last_reset_value_template" not in month_payload
+
+
+def test_ha_discovery_payload_uses_full_user_id():
+    fake = FakeMqttPublisher()
+    publisher = HaMqttPublisher(fake, entity_id_style="full")
+    payload = publisher.build_discovery_payload(
+        "last_electricity_usage", "1234567890123", user_name="家庭用电"
+    )
+    assert payload["unique_id"] == "sensor.last_electricity_usage_1234567890123"
+    assert payload["object_id"] == "last_electricity_usage_1234567890123"
+    assert payload["default_entity_id"] == "sensor.last_electricity_usage_1234567890123"
+
+
+def test_ha_discovery_payload_uses_no_suffix():
+    fake = FakeMqttPublisher()
+    publisher = HaMqttPublisher(fake, entity_id_style="none")
+    payload = publisher.build_discovery_payload(
+        "last_electricity_usage", "1234567890123", user_name="家庭用电"
+    )
+    assert payload["unique_id"] == "sensor.last_electricity_usage"
+    assert payload["object_id"] == "last_electricity_usage"
+    assert payload["default_entity_id"] == "sensor.last_electricity_usage"
+    assert payload["device"]["identifiers"] == ["sgcc_electricity_1234567890123"]
 
 
 def test_sensor_updator_publishes_balance_usage_and_tou(tmp_path, monkeypatch):

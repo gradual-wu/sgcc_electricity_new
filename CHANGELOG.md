@@ -1,5 +1,14 @@
 # Changelog
 
+## [v1.12.0] - 2026-10-21
+
+### Changed
+
+- 新增 `ENTITY_ID_STYLE`，默认 `none`：实体 ID 不再带户号后缀，例如 `sensor.last_electricity_usage`。
+- 可选 `full`（完整户号，多户号唯一）或 `last4`（旧版后 4 位）。
+- 从 `last4` 切换时，`CLEANUP_LEGACY_ENTITY_IDS=true` 会自动删除旧的后 4 位 MQTT Discovery 配置。
+- 每个户号仍然是独立的 HA 设备，设备标识和 `serial_number` 使用完整户号。
+
 ## [v1.11.0] - 2026-10-21
 
 ### Added
