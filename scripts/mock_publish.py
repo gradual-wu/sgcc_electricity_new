@@ -33,6 +33,7 @@ DEFAULT_USER_ID = "9999999999999"
 def build_mock_data():
     yesterday = date.today() - timedelta(days=1)
     month = datetime.now().strftime("%Y-%m")
+    previous_month = (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     daily_usage = 16.06
     return {
         "balance": 729.68,
@@ -72,6 +73,58 @@ def build_mock_data():
             "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
         "user_name": "模拟数据",
+        "data_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "payment_record": {
+            "pay_date": f"{yesterday.isoformat()} 08:30:00",
+            "amount": 200.0,
+            "pay_mode": "微信",
+            "total_rep_amt": 0.0,
+        },
+        "month_bill": {
+            "stat_month": previous_month,
+            "total_usage": 131.0,
+            "total_charge": 78.6,
+            "valley_usage": 50.0,
+            "flat_usage": 40.0,
+            "peak_usage": 35.0,
+            "tip_usage": 6.0,
+            "begin_date": f"{previous_month}-01",
+            "end_date": f"{previous_month}-28",
+            "issue_date": f"{month}-01",
+            "year_usage": 556.0,
+            "year_charge": 333.6,
+            "level_flag": 2,
+            "one_level_pq": 2160.0,
+            "two_level_pq": 2040.0,
+            "ladder_num": "二",
+        },
+        "tier_state": {
+            "year": str(date.today().year),
+            "month": month,
+            "previous_months_usage": 2250.0,
+            "current_month_usage": 300.0,
+            "total_usage": 2550.0,
+            "tier": 2,
+            "tier_name": "第二阶梯",
+            "range_start": 2160.0,
+            "range_end": 4200.0,
+            "range_label": "2161-4200",
+            "remaining_usage": 1650.0,
+            "used_in_tier": 390.0,
+            "progress_percent": 19.12,
+            "thresholds": {"tier1_max": 2160.0, "tier2_max": 4200.0},
+            "current_month_source": "daily_sum",
+        },
+        "tier_official": {
+            "snapshot_date": date.today().isoformat(),
+            "level_flag": 2,
+            "one_level_pq": 2160.0,
+            "two_level_pq": 2040.0,
+            "total_year_pq": 2550.0,
+            "ladder": "年",
+            "ladder_num": "二",
+            "official_tier": 2,
+        },
     }
 
 
@@ -123,6 +176,11 @@ def main():
             enhanced_balance=data["enhanced_balance"],
             user_name=data["user_name"],
             month_period=data["month_period"],
+            payment_record=data["payment_record"],
+            month_bill=data["month_bill"],
+            tier_state=data["tier_state"],
+            tier_official=data["tier_official"],
+            data_updated_at=data["data_updated_at"],
         )
 
         postfix = args.user_id[-4:]

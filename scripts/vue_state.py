@@ -17,6 +17,7 @@ const wantedKeys = [
   'mixinGetYuEdata',
   'consInfoobj',
   'consInfo',
+  'cons',
   'electric',
   'powerData',
   'mothData',
@@ -33,11 +34,30 @@ const wantedKeys = [
   'billNumberList',
   'BillList',
   'billList',
+  'billListS',
+  'billMonthS',
+  'nowBillList',
+  'basicInfo',
+  'pvQtyList',
+  'prcGroupList',
+  'setBilling',
   'billMonth',
   'NewtotalBillProvince',
   'optionalYearArray',
   'selectYear',
-  'listData'
+  'listData',
+  'payLists',
+  'payList',
+  'paymentList',
+  'stepObj',
+  'electricParticulars',
+  'other',
+  'userD',
+  'soc',
+  'yearstep',
+  'newyear',
+  'newmonthdate',
+  'billSettleType'
 ];
 return Array.from(document.querySelectorAll('*'))
   .map((el, index) => {
@@ -144,6 +164,252 @@ def normalize_bill_detail(components: list[dict[str, Any]]) -> dict[str, Any]:
         "tip_usage": _safe_float(pv_qty.get("sharpQty")),
         "raw": bill,
     }
+
+
+def normalize_bill_summary(components: list[dict[str, Any]]) -> dict[str, Any]:
+    """从电费账单汇总页提取月份列表（用于判断哪些月份还没有官方账单）。"""
+    bills = []
+    seen = set()
+    for account_rows in _data_values(components, "billNumberList"):
+        if not isinstance(account_rows, list):
+            continue
+        for account in account_rows:
+            if not isinstance(account, dict):
+                continue
+            for bill in account.get("billList") or []:
+                if not isinstance(bill, dict):
+                    continue
+                month_item = (bill.get("monthList") or [{}])[0]
+                month = _normalize_ym(bill.get("ym"))
+                if not month or month in seen:
+                    continue
+                seen.add(month)
+                bills.append({
+                    "month": month,
+                    "usage": _safe_float(month_item.get("pq")),
+                    "charge": _safe_float(month_item.get("amt")),
+                    "calc_id": month_item.get("calcId"),
+                    "begin_date": month_item.get("begDate"),
+                    "end_date": month_item.get("endDate"),
+                    "issue_date": month_item.get("issuDate"),
+                    "settle_type": month_item.get("billSettleType"),
+                    "settle_name": month_item.get("billSettleName"),
+                })
+    bills.sort(key=lambda item: item["month"])
+    return {
+        "year": str(_first_data_value(components, "selectYear") or ""),
+        "available_years": _first_data_value(components, "optionalYearArray") or [],
+        "bills": bills,
+    }
+
+
+def normalize_payment_records(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """从交费记录页面提取 payLists。"""
+    rows = []
+    for key in ("payLists", "payList", "paymentList"):
+        for value in _data_values(components, key):
+            if isinstance(value, list):
+                rows.extend(item for item in value if isinstance(item, dict))
+        if rows:
+            break
+    records = []
+    seen = set()
+    for row in rows:
+        pay_date = (
+            row.get("payDate")
+            or row.get("payTime")
+            or row.get("rcvDate")
+            or row.get("date")
+        )
+        amount = _safe_float(row.get("rcvAmt", row.get("amount", row.get("payAmt"))))
+        if not pay_date or amount is None:
+            continue
+        key = (str(pay_date), amount, str(row.get("payModeName") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append({
+            "pay_date": pay_date,
+            "amount": amount,
+            "pay_mode": row.get("payModeName") or row.get("payMode") or "",
+            "total_rep_amt": _safe_float(row.get("totalRepAmt")),
+            "cons_no": row.get("consNo") or row.get("consNoDst"),
+            "raw": row,
+        })
+    records.sort(key=lambda item: str(item["pay_date"]))
+    return records
+
+
+def normalize_bill_detail_full(
+    components: list[dict[str, Any]],
+    target_month: str | None = None,
+) -> dict[str, Any]:
+    """从账单详情页提取完整账单，包含阶梯（oneLevelPq/twoLevelPq/levelFlag）。"""
+    candidates = []
+    for key in ("billList", "nowBillList", "BillList"):
+        for value in _data_values(components, key):
+            if isinstance(value, list):
+                candidates.extend(item for item in value if isinstance(item, dict))
+            elif isinstance(value, dict):
+                candidates.append(value)
+
+    # 有些页面把 basicInfo 直接挂在组件上
+    for value in _data_values(components, "basicInfo"):
+        if isinstance(value, dict):
+            candidates.append({"basicInfo": value})
+
+    target = _normalize_ym(target_month) if target_month else ""
+    with_basic = [
+        candidate for candidate in candidates
+        if isinstance(candidate.get("basicInfo"), dict) and candidate.get("basicInfo")
+    ]
+    chosen = None
+    if target:
+        for candidate in with_basic:
+            basic = candidate.get("basicInfo") or {}
+            month = _normalize_ym(candidate.get("ym") or basic.get("ym") or basic.get("month"))
+            if month == target:
+                chosen = candidate
+                break
+        if chosen is None:
+            for candidate in with_basic:
+                basic = candidate.get("basicInfo") or {}
+                month = _normalize_ym(basic.get("begDate") or basic.get("endDate"))
+                if month == target:
+                    chosen = candidate
+                    break
+    if chosen is None and with_basic:
+        chosen = with_basic[0]
+    if chosen is None and target:
+        for candidate in candidates:
+            if _normalize_ym(candidate.get("ym")) == target:
+                chosen = candidate
+                break
+    if chosen is None and candidates:
+        chosen = candidates[0]
+    chosen = chosen or {}
+
+    basic = chosen.get("basicInfo") or {}
+    pv_qty = (chosen.get("pvQtyList") or [{}])[0] or {}
+    month_item = (chosen.get("monthList") or [{}])[0] or {}
+    month = _normalize_ym(chosen.get("ym") or basic.get("ym") or basic.get("month"))
+
+    # 阶梯信息优先取当前账单自身的 basicInfo（历史账单的阶梯数据应归属该月）；
+    # 账单里没有时才回退到汇总页的 setBilling 或阶梯页的 electricParticulars。
+    if any(key in basic for key in ("oneLevelPq", "levelFlag", "totalYearPq")):
+        tier_source = basic
+    else:
+        tier_source = (
+            _first_data_value(components, "setBilling")
+            or _first_data_value(components, "stepObj")
+            or _first_data_value(components, "electricParticulars")
+            or basic
+        )
+    if not isinstance(tier_source, dict):
+        tier_source = {}
+
+    return {
+        "month": month,
+        "user_id": basic.get("consNo"),
+        "begin_date": basic.get("begDate") or basic.get("beginDate"),
+        "end_date": basic.get("endDate"),
+        "issue_date": basic.get("issuDate") or basic.get("issueDate"),
+        "usage": _safe_float(basic.get("monthPq", basic.get("totalPq", month_item.get("pq")))),
+        "charge": _safe_float(basic.get("monthAmt", basic.get("totalAmt", month_item.get("amt")))),
+        "year_usage": _safe_float(basic.get("yearPq")),
+        "year_charge": _safe_float(basic.get("yearAmt")),
+        "valley_usage": _safe_float(pv_qty.get("valQty")),
+        "flat_usage": _safe_float(pv_qty.get("flatQty")),
+        "peak_usage": _safe_float(pv_qty.get("peakQty")),
+        "tip_usage": _safe_float(pv_qty.get("sharpQty")),
+        "one_level_pq": _safe_float(tier_source.get("oneLevelPq")),
+        "two_level_pq": _safe_float(tier_source.get("twoLevelPq")),
+        "total_year_pq": _safe_float(tier_source.get("totalYearPq")),
+        "total_month_pq": _safe_float(tier_source.get("totalMonthPq")),
+        "year_used_pq": _safe_float(tier_source.get("yearUsedPq")),
+        "level_flag": _safe_float(tier_source.get("levelFlag"), default=None),
+        "ladder": tier_source.get("ladder"),
+        "ladder_num": tier_source.get("laddernum") or tier_source.get("ladderNum"),
+        "bill_settle_type": chosen.get("billSettleType") or basic.get("billSettleType"),
+        "charge_segments": _bill_charge_segments(chosen.get("prcGroupList") or []),
+        "raw": chosen,
+    }
+
+
+def normalize_tier_snapshot(components: list[dict[str, Any]]) -> dict[str, Any]:
+    """从阶梯用电页面提取官方阶梯状态。"""
+    step = (
+        _first_data_value(components, "stepObj")
+        or _first_data_value(components, "electricParticulars")
+        or _first_data_value(components, "setBilling")
+        or {}
+    )
+    if not isinstance(step, dict):
+        step = {}
+    other = _first_data_value(components, "other") or {}
+    if not isinstance(other, dict):
+        other = {}
+    user_d = _first_data_value(components, "userD") or {}
+    soc = _first_data_value(components, "soc") or {}
+    ladder_num = other.get("laddernum") or other.get("ladderNum") or ""
+    official_tier = {
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "1": 1,
+        "2": 2,
+        "3": 3,
+    }.get(str(ladder_num).strip(), None)
+    return {
+        "level_flag": _safe_float(step.get("levelFlag"), default=None),
+        "one_level_pq": _safe_float(step.get("oneLevelPq")),
+        "two_level_pq": _safe_float(step.get("twoLevelPq")),
+        "total_year_pq": _safe_float(step.get("totalYearPq")),
+        "total_month_pq": _safe_float(step.get("totalMonthPq")),
+        "year_used_pq": _safe_float(step.get("yearUsedPq")),
+        "ladder": other.get("ladder"),
+        "ladder_num": ladder_num,
+        "official_tier": official_tier,
+        "year_used_pq_ui": _safe_float(other.get("yearUsedPq")),
+        "user_d": user_d,
+        "soc": soc,
+        "yearstep": _first_data_value(components, "yearstep"),
+        "newyear": _first_data_value(components, "newyear"),
+        "newmonthdate": _first_data_value(components, "newmonthdate"),
+        "bill_settle_type": _first_data_value(components, "billSettleType"),
+        "raw": {"step": step, "other": other, "userD": user_d, "soc": soc},
+    }
+
+
+def _bill_charge_segments(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    segments = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for item in group.get("amtList") or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("amtName") or "")
+            segments.append({
+                "name": name,
+                "usage": _safe_float(item.get("pq")),
+                "price": _safe_float(item.get("price")),
+                "charge": _safe_float(item.get("amount")),
+                "period": _period_from_name(name),
+            })
+    return segments
+
+
+def _period_from_name(name: str) -> Optional[str]:
+    if "尖" in name:
+        return "tip"
+    if "峰" in name:
+        return "peak"
+    if "平" in name:
+        return "flat"
+    if "谷" in name:
+        return "valley"
+    return None
 
 
 def _first_data_value(components: list[dict[str, Any]], key: str) -> Any:

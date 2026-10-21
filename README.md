@@ -28,12 +28,15 @@
 | 旧版通过 HA REST API 逐个写 sensor | 改用 **MQTT Discovery**，自动创建带设备分组的实体 |
 | 峰谷电量只在日志里看到 | 新增日/月谷、平、峰、尖分时实体，并写入 MySQL |
 | MySQL 每户一套 `daily{户号}` 表 | 改为 `sg_users` / `sg_daily_usage` / `sg_monthly_usage` / `sg_yearly_usage` / `sg_balance_log` 业务表，默认永久保留 |
+| 缺少交费记录、官方账单和阶梯数据 | 新增 `sg_payments` / `sg_monthly_bill` / `sg_tier_snapshot`，首次运行回补当年数据，并推送缴费与阶梯实体 |
 
 ---
 
 ## 简介
 
 通过 Python Selenium 自动化获取国家电网官网的电费、电量数据，接入 Home Assistant 实体。登录时的腾讯点击/滑块验证码通过**大模型（LLM）视觉识别**自动解算，无需人工干预；若遭遇风控拦截则自动切换二维码登录并通过 **HA 通知**推送二维码图片。
+
+> 完整的数据抓取、数据库、阶梯计算、HA 发布和调度流程见 **[FLOW.md](FLOW.md)**。
 
 **提供以下 HA 实体（通过 MQTT Discovery 自动创建）：**
 
@@ -54,6 +57,25 @@
 | `sensor.month_peak_usage_xxxx` | 当月峰时用电量（kWh） |
 | `sensor.month_tip_usage_xxxx` | 当月尖时用电量（kWh） |
 | `sensor.prepay_balance_xxxx` | 预付费余额 / 应交金额（元） |
+| `sensor.last_payment_amount_xxxx` | 上次缴费金额（元） |
+| `sensor.last_payment_date_xxxx` | 上次缴费时间 |
+| `sensor.current_electricity_tier_xxxx` | 当前阶梯（1/2/3） |
+| `sensor.current_tier_usage_xxxx` | 当前阶梯累计电量（kWh） |
+| `sensor.current_tier_remaining_xxxx` | 当前阶梯剩余电量（kWh） |
+| `sensor.data_updated_at_xxxx` | 数据更新时间（该户号最后一次成功写库时间） |
+
+> 阶梯按年度累计动态计算：历史月份优先使用官方月度账单（缺失时用日数据汇总），
+> 当月使用实时日用电量累加。默认边界为第一阶梯 0-2160、第二阶梯 2161-4200、
+> 第三阶梯 4201 以上，可用 `TIER1_MAX` / `TIER2_MAX` 调整。
+>
+> 每个实体的状态 JSON 都带 `user_id`（完整户号）和 `user_name`（`USER_NAMES` 中的友好名称）
+> 属性，设备详情的 `serial_number` 也是完整户号，方便在仪表盘里按户号筛选展示。
+> `IGNORE_USER_ID` 中的户号不会抓取、不会写入数据库，也不会推送到 HA。
+>
+> 交费记录、官方月度账单（含分时电量、本月电量/电费和阶梯字段）和阶梯快照分别保存在
+> MySQL 的 `sg_payments`、`sg_monthly_bill`、`sg_tier_snapshot` 表；每个户号最后一次
+> 成功写库时间保存在 `sg_users.data_updated_at`，并推送为 `sensor.data_updated_at_xxxx`。
+> 首次运行会回补当年日用电量和缺失的官方账单，`DATA_RETENTION_DAYS=0` 时永久保留。
 
 > 原有 6 个实体 ID 与旧版 REST API 创建的实体保持一致，升级后原有仪表盘/自动化无需修改；
 > 新增的日/月分时实体沿用 ha-95598 的命名风格。
@@ -88,6 +110,29 @@ docker compose logs -f
 - 适合先验证 MQTT、峰谷推送和 MySQL，再决定是否切到 Add-on
 
 > 如果旧版加载项/容器还在运行，先停掉，避免两个进程同时写 HA 实体和 MySQL。
+
+本地不走 Docker 时，可以先用一次性脚本跑完整抓取（含当年数据回补）：
+
+```bash
+source .venv/bin/activate
+python scripts/fetch_once.py --force-backfill
+```
+
+### 抓取 / 数据库 / HA 的分工
+
+- **抓取**：只负责访问国网并把数据写入 MySQL，不直接推送 HA。
+- **日常抓取**：只核对最近 `DAILY_RECONCILE_DAYS`（默认 7）天；首次或 `--force-backfill` 才按 90 天分段回补当年日数据。
+- **每月 1 号**：检查并抓取上个月官方账单；账单未出时后续运行会重试。交费记录和官方阶梯按 `PAYMENT_FETCH_INTERVAL_DAYS` / 每月 1 号控制，避免每天重复访问。
+- **HA 发布**：`SensorUpdator.publish_all_from_db()` 只从 `sg_*` 表读取数据并发布 MQTT，每 5 分钟重发一次；不依赖页面抓取。
+- **不要反复重跑抓取**：频繁登录/抓取会触发国网风控。日常只需要定时任务；排查数据优先用下面的只读工具。
+
+查看数据库、修复当月/年度汇总、从数据库发布 HA（不访问国网）：
+
+```bash
+python scripts/db_status.py --user-id 1234567890123
+python scripts/db_status.py --user-id 1234567890123 --repair
+python scripts/db_status.py --user-id 1234567890123 --publish
+```
 
 ### 方式 B：发布自己的 Add-on 镜像
 

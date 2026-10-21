@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -11,6 +11,7 @@ from date_utils import (
     day_start_iso,
     month_start_iso,
     normalize_date,
+    normalize_datetime,
     normalize_month,
     now_iso,
     to_float,
@@ -139,6 +140,11 @@ class SensorUpdator:
         bill_tou_data: dict = None,
         user_name: str = "",
         month_period: str = "",
+        payment_record: dict = None,
+        month_bill: dict = None,
+        tier_state: dict = None,
+        tier_official: dict = None,
+        data_updated_at: str = None,
         notify: bool = True,
     ):
         logging.info(f"[{user_id}] 开始更新 Home Assistant MQTT 传感器数据...")
@@ -165,6 +171,10 @@ class SensorUpdator:
             bill_tou_data,
             user_name,
             month_period,
+            payment_record,
+            month_bill,
+            tier_state,
+            tier_official,
         )
 
         if balance is not None:
@@ -221,14 +231,60 @@ class SensorUpdator:
             )
 
         current_month = datetime.now().strftime("%Y-%m")
-        display_month = normalize_month(month_period) or current_month
+        bill_month = normalize_month((month_bill or {}).get("stat_month")) if month_bill else None
+        if bill_month:
+            bill_usage = to_float(month_bill.get("total_usage"))
+            bill_charge = to_float(month_bill.get("total_charge"))
+            if bill_usage is not None:
+                month_usage = bill_usage
+            if bill_charge is not None:
+                month_charge = bill_charge
+            display_month = bill_month
+
+            monthly_tou, period, source = self._resolve_month_tou(
+                tou_data, bill_tou_data, preferred_month=display_month
+            )
+            bill_tou = {
+                key: to_float(month_bill.get(key))
+                for key in TOU_FIELDS
+                if to_float(month_bill.get(key)) is not None
+            }
+            if bill_tou:
+                monthly_tou, period, source = bill_tou, bill_month, "official"
+            else:
+                # 官方账单没有分时电量时，不要把当月页面的分时数据挂到账单月份上
+                monthly_tou, period, source = {}, bill_month, "official"
+        else:
+            display_month = normalize_month(month_period) or current_month
+            monthly_tou, period, source = self._resolve_month_tou(
+                tou_data, bill_tou_data, preferred_month=display_month
+            )
+
+        month_attributes = {
+            "last_reset": month_start_iso(display_month),
+            "period": display_month,
+            "source": "official" if bill_month else (source or "page"),
+        }
+        if bill_month:
+            month_attributes.update({
+                "begin_date": month_bill.get("begin_date"),
+                "end_date": month_bill.get("end_date"),
+                "issue_date": month_bill.get("issue_date"),
+                "year_usage": to_float(month_bill.get("year_usage")),
+                "year_charge": to_float(month_bill.get("year_charge")),
+                "level_flag": month_bill.get("level_flag"),
+                "one_level_pq": to_float(month_bill.get("one_level_pq")),
+                "two_level_pq": to_float(month_bill.get("two_level_pq")),
+                "ladder_num": month_bill.get("ladder_num"),
+            })
+
         if month_usage is not None:
             self._publish_sensor(
                 user_id,
                 "month_electricity_usage",
                 month_usage,
                 user_name,
-                {"last_reset": month_start_iso(display_month), "period": display_month},
+                month_attributes,
             )
         if month_charge is not None:
             self._publish_sensor(
@@ -236,10 +292,9 @@ class SensorUpdator:
                 "month_electricity_charge",
                 month_charge,
                 user_name,
-                {"last_reset": month_start_iso(display_month), "period": display_month},
+                month_attributes,
             )
 
-        monthly_tou, period, source = self._resolve_month_tou(tou_data, bill_tou_data)
         for key, value in monthly_tou.items():
             self._publish_sensor(
                 user_id,
@@ -265,11 +320,241 @@ class SensorUpdator:
                 },
             )
 
+        self._publish_payment_sensors(user_id, payment_record, user_name)
+        self._publish_tier_sensors(user_id, tier_state, tier_official, user_name)
+        if data_updated_at:
+            updated = normalize_datetime(data_updated_at)
+            if updated:
+                self._publish_sensor(
+                    user_id,
+                    "data_updated_at",
+                    updated.replace(" ", "T") + "+08:00",
+                    user_name,
+                    {"updated_at": updated},
+                )
+
         logging.info(f"[{user_id}] Home Assistant MQTT 传感器数据更新完成!")
+
+    def _publish_payment_sensors(self, user_id: str, payment_record: Optional[dict], user_name: str):
+        if not payment_record:
+            return
+        payment_date = normalize_datetime(payment_record.get("pay_date"))
+        amount = to_float(payment_record.get("amount"))
+        attributes = {
+            "pay_date": payment_date,
+            "pay_mode": payment_record.get("pay_mode"),
+            "total_rep_amt": to_float(payment_record.get("total_rep_amt")),
+        }
+        if amount is not None:
+            self._publish_sensor(
+                user_id, "last_payment_amount", amount, user_name, attributes
+            )
+        if payment_date:
+            timestamp = payment_date.replace(" ", "T") + "+08:00"
+            self._publish_sensor(
+                user_id, "last_payment_date", timestamp, user_name, attributes
+            )
+
+    def _publish_tier_sensors(
+        self,
+        user_id: str,
+        tier_state: Optional[dict],
+        tier_official: Optional[dict],
+        user_name: str,
+    ):
+        if not tier_state:
+            return
+        official = tier_official or {}
+        attributes = {
+            "tier_name": tier_state.get("tier_name"),
+            "range": tier_state.get("range_label"),
+            "range_start": tier_state.get("range_start"),
+            "range_end": tier_state.get("range_end"),
+            "total_usage": tier_state.get("total_usage"),
+            "previous_months_usage": tier_state.get("previous_months_usage"),
+            "current_month_usage": tier_state.get("current_month_usage"),
+            "remaining_usage": tier_state.get("remaining_usage"),
+            "used_in_tier": tier_state.get("used_in_tier"),
+            "progress_percent": tier_state.get("progress_percent"),
+            "year": tier_state.get("year"),
+            "month": tier_state.get("month"),
+            "last_reset": f"{tier_state.get('year')}-01-01T00:00:00+08:00",
+            "thresholds": tier_state.get("thresholds"),
+            "current_month_source": tier_state.get("current_month_source"),
+            "previous_month_sources": tier_state.get("previous_month_sources"),
+            "official_tier": official.get("official_tier"),
+            "official_level_flag": official.get("level_flag"),
+            "official_one_level_pq": official.get("one_level_pq"),
+            "official_two_level_pq": official.get("two_level_pq"),
+            "official_total_year_pq": official.get("total_year_pq"),
+            "official_total_month_pq": official.get("total_month_pq"),
+            "official_ladder": official.get("ladder"),
+            "official_ladder_num": official.get("ladder_num"),
+            "official_snapshot_date": official.get("snapshot_date"),
+        }
+        self._publish_sensor(
+            user_id, "current_electricity_tier", tier_state.get("tier"), user_name, attributes
+        )
+        self._publish_sensor(
+            user_id, "current_tier_usage", tier_state.get("total_usage"), user_name, attributes
+        )
+        self._publish_sensor(
+            user_id,
+            "current_tier_remaining",
+            tier_state.get("remaining_usage"),
+            user_name,
+            attributes,
+        )
+
+    # ------------------------------------------------------------------
+    # publish from database
+    # ------------------------------------------------------------------
+    def publish_from_db(self, user_id: str, db, notify: bool = True) -> bool:
+        """从数据库读取一个户号的全部数据并推送 HA，不访问国网页面。"""
+        if db is None:
+            return False
+        if not db.connect_user_db(user_id):
+            return False
+        try:
+            user = db.get_user(user_id) or {}
+            user_name = user.get("user_name") or ""
+
+            balance_row = db.get_latest_balance() or {}
+            latest_daily = db.get_latest_daily() or {}
+            today = datetime.now()
+            current_month = today.strftime("%Y-%m")
+            previous_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+            month_bill = db.get_monthly_bill(previous_month)
+            month_row = None
+            if month_bill:
+                month_row = {
+                    "month": month_bill.get("stat_month"),
+                    "total_usage": to_float(month_bill.get("total_usage")),
+                    "total_charge": to_float(month_bill.get("total_charge")),
+                    "valley_usage": to_float(month_bill.get("valley_usage")),
+                    "flat_usage": to_float(month_bill.get("flat_usage")),
+                    "peak_usage": to_float(month_bill.get("peak_usage")),
+                    "tip_usage": to_float(month_bill.get("tip_usage")),
+                    "source": "official",
+                }
+            if month_row is None:
+                month_row = (
+                    db.get_monthly_usage_row(previous_month)
+                    or db.get_monthly_usage_row(current_month)
+                    or {}
+                )
+
+            year = str(today.year)
+            year_row = db.get_yearly_row(year)
+            if not year_row:
+                monthly_rows = db.get_monthly_usage_rows(year)
+                if monthly_rows:
+                    year_row = {
+                        "total_usage": sum(
+                            to_float(row.get("total_usage"), default=0.0) or 0.0
+                            for row in monthly_rows
+                        ),
+                        "total_charge": sum(
+                            to_float(row.get("total_charge"), default=0.0) or 0.0
+                            for row in monthly_rows
+                        ),
+                    }
+
+            tou_data = {}
+            if latest_daily:
+                tou_data["daily"] = [latest_daily]
+            if month_row:
+                tou_data["months"] = [month_row]
+
+            enhanced_balance = None
+            if balance_row.get("amount_due") is not None or balance_row.get("as_of"):
+                enhanced_balance = {
+                    "amount_due": balance_row.get("amount_due"),
+                    "as_of": balance_row.get("as_of"),
+                }
+
+            bill_tou_data = None
+            if month_bill:
+                bill_tou_data = {
+                    "month": month_bill.get("stat_month"),
+                    "usage": month_bill.get("total_usage"),
+                    "charge": month_bill.get("total_charge"),
+                    "valley_usage": month_bill.get("valley_usage"),
+                    "flat_usage": month_bill.get("flat_usage"),
+                    "peak_usage": month_bill.get("peak_usage"),
+                    "tip_usage": month_bill.get("tip_usage"),
+                    "source": "official",
+                }
+            elif month_row:
+                bill_tou_data = {
+                    "month": month_row.get("month"),
+                    "usage": month_row.get("total_usage"),
+                    "charge": month_row.get("total_charge"),
+                    "valley_usage": month_row.get("valley_usage"),
+                    "flat_usage": month_row.get("flat_usage"),
+                    "peak_usage": month_row.get("peak_usage"),
+                    "tip_usage": month_row.get("tip_usage"),
+                    "source": month_row.get("source") or "calculated",
+                }
+
+            tier1 = float(os.getenv("TIER1_MAX", "2160"))
+            tier2 = float(os.getenv("TIER2_MAX", "4200"))
+            tier_state = db.get_tier_state(tier1, tier2)
+            tier_official = db.get_latest_tier_snapshot()
+
+            self.update_one_userid(
+                user_id=user_id,
+                balance=balance_row.get("balance"),
+                last_daily_date=latest_daily.get("date"),
+                last_daily_usage=latest_daily.get("total_usage"),
+                yearly_charge=(year_row or {}).get("total_charge"),
+                yearly_usage=(year_row or {}).get("total_usage"),
+                month_charge=month_row.get("total_charge"),
+                month_usage=month_row.get("total_usage"),
+                tou_data=tou_data,
+                enhanced_balance=enhanced_balance,
+                bill_tou_data=bill_tou_data,
+                user_name=user_name,
+                month_period=month_row.get("month") or previous_month,
+                payment_record=db.get_latest_payment(),
+                month_bill=month_bill,
+                tier_state=tier_state,
+                tier_official=tier_official,
+                data_updated_at=user.get("data_updated_at"),
+                notify=notify,
+            )
+            return bool(
+                balance_row or latest_daily or month_row or year_row or month_bill
+            )
+        finally:
+            db.close_connect()
+
+    def publish_all_from_db(self, db, notify: bool = True) -> bool:
+        """从数据库读取所有户号并推送 HA。"""
+        if db is None:
+            return False
+        if not db.connect_users_db():
+            logging.warning("无法连接数据库，跳过 HA 发布。")
+            return False
+        try:
+            users = db.get_users()
+        finally:
+            db.close_connect()
+        if not users:
+            logging.info("数据库中没有户号，跳过 HA 发布。")
+            return False
+        published = False
+        for user in users:
+            try:
+                if self.publish_from_db(user["user_id"], db, notify=notify):
+                    published = True
+            except Exception as exc:
+                logging.warning(f"[{user.get('user_id')}] 从数据库推送 HA 失败: {exc}")
+        return published
 
     @staticmethod
     def _yearly_attributes() -> Dict[str, Any]:
-        # 1 月页面默认展示上一年数据，国网页面逻辑与原版保持一致
         report_year = datetime.now().year - 1 if datetime.now().month == 1 else datetime.now().year
         return {
             "last_reset": f"{report_year}-01-01T00:00:00+08:00",
@@ -300,6 +585,10 @@ class SensorUpdator:
         bill_tou_data=None,
         user_name="",
         month_period="",
+        payment_record=None,
+        month_bill=None,
+        tier_state=None,
+        tier_official=None,
     ):
         cache_file = self._get_cache_file()
         abs_cache_file = os.path.abspath(cache_file)
@@ -332,6 +621,14 @@ class SensorUpdator:
             cache_entry["user_name"] = user_name
         if month_period:
             cache_entry["month_period"] = month_period
+        if payment_record:
+            cache_entry["payment_record"] = payment_record
+        if month_bill:
+            cache_entry["month_bill"] = self._strip_raw(month_bill)
+        if tier_state:
+            cache_entry["tier_state"] = tier_state
+        if tier_official:
+            cache_entry["tier_official"] = self._strip_raw(tier_official)
 
         data[user_id] = cache_entry
 
@@ -345,10 +642,10 @@ class SensorUpdator:
 
     @staticmethod
     def _strip_raw(data: dict) -> dict:
-        """缓存里不需要页面原始 Vue state，只保留结构化的日/月数据。"""
+        """缓存里不需要页面原始 Vue state / 原始 JSON，只保留结构化数据。"""
         if not isinstance(data, dict):
             return data
-        return {key: value for key, value in data.items() if key != "raw"}
+        return {key: value for key, value in data.items() if key not in ("raw", "raw_json")}
 
     def republish(self):
         cache_file = self._get_cache_file()
@@ -511,10 +808,12 @@ class SensorUpdator:
     def _resolve_month_tou(
         tou_data: Optional[dict],
         bill_tou_data: Optional[dict],
+        preferred_month: Optional[str] = None,
     ):
         """返回 (月度分时数据, 所属月份, 数据来源)。"""
         current_month = datetime.now().strftime("%Y-%m")
         bill_month = normalize_month((bill_tou_data or {}).get("month"))
+        bill_source = (bill_tou_data or {}).get("source") or "official"
         bill_values = {}
         if bill_tou_data:
             for key in TOU_FIELDS:
@@ -522,8 +821,14 @@ class SensorUpdator:
                 if value is not None:
                     bill_values[key] = value
 
+        preferred = normalize_month(preferred_month) if preferred_month else current_month
+
+        # 优先使用与展示月份一致的账单/月度汇总分时数据
+        if bill_month and bill_month == preferred and bill_values:
+            return bill_values, bill_month, bill_source
+
         if bill_month == current_month and bill_values:
-            return bill_values, current_month, "official"
+            return bill_values, current_month, bill_source
 
         # 当月账单通常还没出，用当月已有的日数据累加
         month_values = {key: 0.0 for key in TOU_FIELDS}
@@ -538,10 +843,10 @@ class SensorUpdator:
                 for key in TOU_FIELDS:
                     month_values[key] += to_float(row.get(key), default=0.0) or 0.0
 
-        if row_count:
+        if row_count and preferred == current_month:
             return month_values, current_month, "daily_sum"
 
         if bill_values and bill_month:
-            return bill_values, bill_month, "official"
+            return bill_values, bill_month, bill_source
 
         return {}, None, None

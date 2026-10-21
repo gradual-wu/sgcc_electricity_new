@@ -143,6 +143,45 @@ SENSOR_SPECS: Dict[str, Dict[str, Any]] = {
         "icon": "mdi:chart-bell-curve-cumulative",
         "precision": 3,
     },
+    # 交费记录
+    "last_payment_amount": {
+        "label": "上次缴费金额",
+        "unit": "CNY",
+        "device_class": "monetary",
+        "icon": "mdi:cash-multiple",
+        "precision": 2,
+    },
+    "last_payment_date": {
+        "label": "上次缴费时间",
+        "device_class": "timestamp",
+        "icon": "mdi:calendar-clock",
+    },
+    "data_updated_at": {
+        "label": "数据更新时间",
+        "device_class": "timestamp",
+        "icon": "mdi:clock-check-outline",
+    },
+    # 阶梯用电（按年度累计动态计算）
+    "current_electricity_tier": {
+        "label": "当前阶梯",
+        "icon": "mdi:stairs",
+    },
+    "current_tier_usage": {
+        "label": "当前阶梯累计电量",
+        "unit": "kWh",
+        "device_class": "energy",
+        "state_class": "measurement",
+        "icon": "mdi:lightning-bolt",
+        "precision": 3,
+    },
+    "current_tier_remaining": {
+        "label": "当前阶梯剩余电量",
+        "unit": "kWh",
+        "device_class": "energy",
+        "state_class": "measurement",
+        "icon": "mdi:battery-50",
+        "precision": 3,
+    },
 }
 
 
@@ -190,6 +229,7 @@ class HaMqttPublisher:
             "name": f"国网电费 {display_name}",
             "manufacturer": self.device_manufacturer,
             "model": self.device_model,
+            "serial_number": str(user_id),
             "configuration_url": "https://github.com/gradual-wu/sgcc_electricity_new",
         }
 
@@ -259,7 +299,9 @@ class HaMqttPublisher:
         self.mqtt.publish(discovery_topic, discovery_payload, retain=True)
         self._published_discovery.add(discovery_topic)
 
-        payload: Dict[str, Any] = {"state": state}
+        payload: Dict[str, Any] = {"state": state, "user_id": user_id}
+        if user_name:
+            payload["user_name"] = user_name
         if attributes:
             payload.update({k: v for k, v in attributes.items() if v is not None})
         return self.mqtt.publish(

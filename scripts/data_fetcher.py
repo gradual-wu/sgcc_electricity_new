@@ -6,24 +6,41 @@ import json
 
 import random
 import base64
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from selenium import webdriver
 from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
-from sensor_updator import SensorUpdator
 from error_watcher import ErrorWatcher
 from typing import Optional
 
 from const import *
 
-from date_utils import normalize_month, normalize_year, to_float
+from date_utils import normalize_date, normalize_month, normalize_year, to_float
 
 import numpy as np
 from captcha_selenium import solve_captcha_in_browser
 import vue_state
+
+
+# 电费账单页选择器（与 ha-95598 保持一致）
+BILL_CARD = "//div[contains(@class,'billContent_bill')]"
+BILL_YEAR_OPTIONS = "//div[contains(@class,'billList_timeSelection')]//div[contains(@class,'content_year')]/span"
+BILL_ACTIVE_YEAR = "//div[contains(@class,'billList_timeSelection')]//div[contains(@class,'content_sleectYear')]/span"
+BILL_EXPAND_BUTTON = "//div[contains(@class,'content_button')]//*[contains(text(),'查看更多')]"
+BILL_MONTH_LABEL = "//div[contains(@class,'bill_time')]/span[1]"
+BILL_LIST_ROW = "//div[contains(@class,'billList_content')]"
+BILL_ROW_DETAIL_ARROW = ".//img[contains(@class,'back_right')]"
+BILL_DETAIL_CYCLE = "//div[contains(@class,'billInfo_cycle')]"
+
+
+def bill_year_option(target_year: int) -> str:
+    return (
+        "//div[contains(@class,'billList_timeSelection')]//div[contains(@class,'content_year')]/"
+        f"span[normalize-space()='{int(target_year)}年']"
+    )
 
 class DataFetcher:
 
@@ -38,6 +55,8 @@ class DataFetcher:
         self.RETRY_TIMES_LIMIT = int(os.getenv("RETRY_TIMES_LIMIT", 5))
         self.LOGIN_EXPECTED_TIME = int(os.getenv("LOGIN_EXPECTED_TIME", 10))
         self.RETRY_WAIT_TIME_OFFSET_UNIT = int(os.getenv("RETRY_WAIT_TIME_OFFSET_UNIT", 10))
+        # 数据页操作等待；页面加载通常几秒内完成，不需要像登录那样长时间等待
+        self.PAGE_WAIT_TIME = int(os.getenv("PAGE_WAIT_TIME", "10"))
         self.IGNORE_USER_ID = os.getenv("IGNORE_USER_ID", "xxxxx,xxxxx").split(",")
         self.QR_CODE_LOGIN_WAIT_COUNT = int(os.getenv("QR_CODE_LOGIN_WAIT_COUNT", 18))
         self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT = int(os.getenv("QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT", 10))
@@ -48,6 +67,7 @@ class DataFetcher:
                 if ":" in pair:
                     uid, name = pair.split(":", 1)
                     self._user_name_map[uid.strip()] = name.strip()
+        self._backfilled_years = set()
         self._init_db()
 
     def _init_db(self):
@@ -310,7 +330,7 @@ class DataFetcher:
             input_elements[0].send_keys(self._username)
             logging.info(f"已输入用户名: {self._username}\r")
             input_elements[1].send_keys(self._password)
-            logging.info(f"已输入密码: {self._password}\r")
+            logging.info("已输入密码。\r")
 
             # 点击登录按钮
             self._click_button(driver, By.CLASS_NAME, "el-button.el-button--primary")
@@ -429,7 +449,6 @@ class DataFetcher:
 
         self._random_delay(1, 3)
         logging.info("浏览器驱动已初始化。")
-        updator = SensorUpdator()
 
         try:
             if os.getenv("DEBUG_MODE", "false").lower() == "true":
@@ -450,6 +469,14 @@ class DataFetcher:
             driver.quit()
             return
 
+        try:
+            return self.fetch_with_driver(driver)
+        finally:
+            driver.quit()
+
+    def fetch_with_driver(self, driver):
+        """在已登录的浏览器里执行抓取并写库，不负责创建/退出浏览器，也不直接推送 HA。"""
+        processed_user_ids = []
         logging.info(f"在 {LOGIN_URL} 登录成功")
         self._random_delay(1, 3)
         # self._random_mouse_move(driver)
@@ -460,33 +487,48 @@ class DataFetcher:
 
 
         for userid_index, user_id in enumerate(user_id_list):
+            if user_id in self.IGNORE_USER_ID:
+                logging.info(f"用户 ID {user_id} 将被忽略")
+                continue
             try:
                 self._random_delay(1, 3)
                 # 切换到电费余额页面
                 driver.get(BALANCE_URL)
                 time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
-                self._choose_current_userid(driver,userid_index)
+                self._choose_current_userid(driver, userid_index, target_user_id=user_id)
                 time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
-                current_userid = self._get_current_userid(driver)
+                current_userid = self._get_page_user_id(driver)
+                if current_userid and current_userid != user_id:
+                    logging.warning(
+                        f"户号不匹配：期望 {user_id}，页面当前为 {current_userid}，重试切换"
+                    )
+                    self._choose_current_userid(driver, userid_index, target_user_id=user_id)
+                    time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+                    current_userid = self._get_page_user_id(driver)
+                if current_userid and current_userid != user_id:
+                    logging.error(
+                        f"户号匹配失败：期望 {user_id}，页面当前为 {current_userid}，跳过该户号"
+                    )
+                    continue
                 if current_userid in self.IGNORE_USER_ID:
                     logging.info(f"用户 ID {current_userid} 将被忽略")
                     continue
-                else:
-                    ### 获取数据
-                    (balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage,
-                     month_charge, month_usage, tou_data, enhanced_balance, bill_tou_data,
-                     user_name, month_period) = self._get_all_data(driver, user_id, userid_index)
-                    logging.info(f"用户 [{user_id}] 数据获取完成: 余额={balance}元, 最近日用电={last_daily_usage}度({last_daily_date}), "
-                                 f"年度用电={yearly_usage}度, 年度电费={yearly_charge}元, 月用电={month_usage}度, 月电费={month_charge}元")
-                    updator.update_one_userid(
-                        user_id, balance, last_daily_date, last_daily_usage,
-                        yearly_charge, yearly_usage, month_charge, month_usage,
-                        tou_data=tou_data, enhanced_balance=enhanced_balance,
-                        bill_tou_data=bill_tou_data, user_name=user_name,
-                        month_period=month_period,
+                data_user_id = current_userid or user_id
+                ### 获取数据
+                (balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage,
+                 month_charge, month_usage, tou_data, enhanced_balance, bill_tou_data,
+                 user_name, month_period) = self._get_all_data(driver, data_user_id, userid_index)
+                logging.info(f"用户 [{data_user_id}] 数据获取完成: 余额={balance}元, 最近日用电={last_daily_usage}度({last_daily_date}), "
+                             f"年度用电={yearly_usage}度, 年度电费={yearly_charge}元, 月用电={month_usage}度, 月电费={month_charge}元")
+                try:
+                    self._sync_extras(
+                        driver, data_user_id, userid_index, user_name=user_name
                     )
+                except Exception as exc:
+                    logging.warning(f"[{data_user_id}] 附加数据同步失败（不影响主流程）: {exc}")
+                processed_user_ids.append(data_user_id)
 
-                    time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+                time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
             except Exception as e:
                 if (userid_index != len(user_id_list)):
                     logging.info(f"当前用户 {user_id} 数据抓取失败: {e}，将继续抓取下一个用户数据。")
@@ -495,7 +537,7 @@ class DataFetcher:
                     logging.info("数据抓取完成后浏览器驱动退出。")
                 continue
 
-        driver.quit()
+        return processed_user_ids
 
 
     def _get_current_userid(self, driver) -> str:
@@ -528,8 +570,47 @@ class DataFetcher:
         logging.warning("无法读取当前户号")
         return ""
 
-    def _choose_current_userid(self, driver, userid_index):
-        """切换到指定索引的用户户号"""
+    def _open_user_selector(self, driver) -> bool:
+        """打开户号选择器；优先使用用电量/账单页的 .houseNum 下拉。"""
+        inputs = driver.find_elements(By.CSS_SELECTOR, ".houseNum .el-select .el-input__inner")
+        if inputs:
+            try:
+                driver.execute_script("arguments[0].click();", inputs[0])
+                return True
+            except Exception:
+                pass
+
+        # 顶部导航的通用账户下拉（电费账单等页面使用）
+        try:
+            dropdown = driver.find_element(By.CLASS_NAME, "el-dropdown")
+            trigger = dropdown.find_element(By.TAG_NAME, "span")
+            driver.execute_script("arguments[0].click();", trigger)
+            return True
+        except Exception:
+            pass
+
+        for xpath in (
+            "//span[contains(normalize-space(.), '切换用户')]",
+            "//div[contains(@class,'houseNum')]//div[contains(@class,'el-select')]//span[contains(@class,'el-input__suffix')]",
+            "//div[contains(@class,'houseNum')]//span[contains(normalize-space(.), '切换用户')]",
+        ):
+            try:
+                trigger = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                driver.execute_script("arguments[0].click();", trigger)
+                return True
+            except Exception:
+                continue
+
+        try:
+            self._click_button(driver, By.CLASS_NAME, "el-input__suffix")
+            return True
+        except Exception:
+            return False
+
+    def _choose_current_userid(self, driver, userid_index, target_user_id: str = ""):
+        """切换到指定户号；优先按户号文本匹配，匹配不到再按索引。"""
         # 关闭确认弹窗（如果有）
         elements = driver.find_elements(By.CLASS_NAME, "button_confirm")
         if elements:
@@ -537,31 +618,55 @@ class DataFetcher:
                 self._click_button(driver, By.XPATH, "//*[@id='app']/div/div[2]/div/div/div/div[2]/div[2]/div/button")
             except Exception:
                 pass
-        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+        time.sleep(self.PAGE_WAIT_TIME)
 
-        # 打开用户选择器（兼容多种触发方式）
+        # 下拉选项轮询不能叠加 60 秒隐式等待，否则找不到选项时会卡很久
+        driver.implicitly_wait(0)
         try:
-            trigger = WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(
-                EC.element_to_be_clickable((
-                    By.XPATH,
-                    "//span[contains(normalize-space(.), '切换用户')]"
-                    " | //div[contains(@class,'houseNum')]//div[contains(@class,'el-select')]//span[contains(@class,'el-input__suffix')]"
-                    " | //div[contains(@class,'houseNum')]//span[contains(normalize-space(.), '切换用户')]"
-                ))
-            )
-            driver.execute_script("arguments[0].click();", trigger)
-        except Exception:
-            # 备用方案: 点击 el-input__suffix（下拉箭头）
-            self._click_button(driver, By.CLASS_NAME, "el-input__suffix")
-        time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+            # 打开用户选择器并等待选项出现
+            options = []
+            for attempt in range(3):
+                self._open_user_selector(driver)
+                deadline = time.time() + 6
+                while time.time() < deadline:
+                    options = self._get_visible_user_options(driver)
+                    if options:
+                        break
+                    time.sleep(1)
+                if options:
+                    break
+                time.sleep(2)
+            if not options:
+                logging.error("户号下拉选项为空，无法切换用户")
+                return False
 
-        # 获取下拉选项并点击目标
-        options = self._get_visible_user_options(driver)
-        if userid_index >= len(options):
-            logging.error(f"用户索引 {userid_index} 超出范围, 共 {len(options)} 个选项")
-            return
-        driver.execute_script("arguments[0].click();", options[userid_index])
-        logging.info(f"已切换到用户索引 {userid_index}")
+            # 获取下拉选项并点击目标
+            target = None
+            if target_user_id:
+                for option in options:
+                    try:
+                        text = option.text or ""
+                    except Exception:
+                        continue
+                    if target_user_id in text:
+                        target = option
+                        break
+                if target is None:
+                    # 某些页面只显示户号后 4 位或友好名称，无法用完整户号匹配；
+                    # 回退按索引点击，随后由 _get_page_user_id 校验是否切换正确。
+                    logging.warning(
+                        f"下拉选项中未匹配到完整户号 {target_user_id}，回退按索引 {userid_index} 切换"
+                    )
+            if target is None:
+                if userid_index >= len(options):
+                    logging.error(f"用户索引 {userid_index} 超出范围, 共 {len(options)} 个选项")
+                    return False
+                target = options[userid_index]
+            driver.execute_script("arguments[0].click();", target)
+            logging.info(f"已切换到用户索引 {userid_index}（目标户号 {target_user_id or '按索引'}）")
+            return True
+        finally:
+            driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)
 
     def _get_visible_user_options(self, driver):
         """获取可见的用户下拉选项（兼容 el-dropdown 和 el-select）"""
@@ -601,10 +706,15 @@ class DataFetcher:
         driver.get(ELECTRIC_USAGE_URL)
         time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
         try:
-            self._choose_current_userid(driver, userid_index)
+            self._choose_current_userid(driver, userid_index, target_user_id=user_id)
         except Exception as e:
             logging.warning(f"[{user_id}] 用电量页面用户切换失败 (非致命): {e}")
         time.sleep(self.RETRY_WAIT_TIME_OFFSET_UNIT)
+        page_user_id = self._get_page_user_id(driver)
+        if page_user_id and page_user_id != user_id:
+            raise RuntimeError(
+                f"用电量页面户号 {page_user_id} 与目标 {user_id} 不一致"
+            )
 
         logging.info(f"[{user_id}] 正在获取年度用电数据...")
         yearly_usage, yearly_charge = self._get_yearly_data(driver)
@@ -717,10 +827,11 @@ class DataFetcher:
                     userid_elements = driver.find_element(By.CLASS_NAME, "el-dropdown-menu.el-popper").find_elements(By.TAG_NAME, "li")
                     userid_list = []
                     for element in userid_elements:
-                        matches = re.findall("[0-9]+", element.text)
+                        matches = re.findall(r"\b\d{13}\b", element.text or "")
                         if matches:
                             uid = matches[-1]
-                            userid_list.append(uid)
+                            if uid not in userid_list:
+                                userid_list.append(uid)
                     if userid_list:
                         logging.info(f"从 el-dropdown 获取到 {len(userid_list)} 个用户: {userid_list}")
                         return userid_list
@@ -895,7 +1006,7 @@ class DataFetcher:
     def _get_daily_usage_data(self, driver):
         """获取每日用电量数据 (7天或30天)，通过 radio 按钮切换，失败时返回空列表"""
         try:
-            fetch_days = int(os.getenv("DAILY_FETCH_DAYS", 30))
+            fetch_days = int(os.getenv("DAILY_FETCH_DAYS", 7))
             if fetch_days not in (7, 30):
                 fetch_days = 7
             logging.info(f"正在获取每日用电量数据 (最近 {fetch_days} 天)")
@@ -1011,6 +1122,584 @@ class DataFetcher:
             logging.warning(f"[{user_id}] 获取账单分时数据异常: {e}")
             return None
 
+    # ------------------------------------------------------------------
+    # 交费记录 / 官方账单 / 阶梯 / 全年回补
+    # ------------------------------------------------------------------
+    def _get_page_user_id(self, driver) -> str:
+        """优先从 Vue state 读取当前户号，避免页面源码里匹配到其它户号。"""
+        try:
+            for component in vue_state.selected_vue_data(driver) or []:
+                data = component.get("data") or {}
+                for key in (
+                    "listData", "billListS", "billMonthS", "consInfoobj",
+                    "consInfo", "cons", "electric", "usermasg",
+                ):
+                    obj = data.get(key)
+                    if not isinstance(obj, dict):
+                        continue
+                    for id_key in ("consNo_dst", "consNoDst", "consNo", "consId"):
+                        value = str(obj.get(id_key) or "").strip()
+                        if re.fullmatch(r"\d{13}", value):
+                            return value
+        except Exception:
+            pass
+        return self._get_current_userid(driver)
+
+    def _select_on_balance_page(self, driver, userid_index: int, label: str, expected_user_id: str = "") -> str:
+        """余额页的账户下拉最稳定，先用它设置全局户号。"""
+        driver.get(BALANCE_URL)
+        time.sleep(self.PAGE_WAIT_TIME)
+        try:
+            WebDriverWait(driver, max(self.PAGE_WAIT_TIME, 15)).until(
+                EC.presence_of_element_located((By.ID, "app"))
+            )
+        except Exception:
+            pass
+        try:
+            self._choose_current_userid(driver, userid_index, target_user_id=expected_user_id)
+        except Exception as exc:
+            logging.warning(f"[{label}] 余额页切换户号失败（忽略）: {exc}")
+        time.sleep(self.PAGE_WAIT_TIME)
+
+        current = ""
+        if expected_user_id:
+            current = self._get_page_user_id(driver)
+            if current and current != expected_user_id:
+                logging.warning(
+                    f"[{label}] 余额页户号 {current} 与目标 {expected_user_id} 不一致，重试切换"
+                )
+                try:
+                    self._choose_current_userid(driver, userid_index, target_user_id=expected_user_id)
+                    time.sleep(self.PAGE_WAIT_TIME)
+                except Exception as exc:
+                    logging.warning(f"[{label}] 余额页重试切换户号失败: {exc}")
+                current = self._get_page_user_id(driver)
+        return current
+
+    def _open_user_page(self, driver, url: str, userid_index: int, label: str, expected_user_id: str = ""):
+        # 先在余额页切换到目标户号，再打开目标页面；国网会把户号保存在全局状态里
+        current = self._select_on_balance_page(driver, userid_index, label, expected_user_id)
+        if expected_user_id and current and current != expected_user_id:
+            raise RuntimeError(
+                f"{label} 余额页户号 {current} 与目标 {expected_user_id} 不一致"
+            )
+
+        driver.get(url)
+        time.sleep(self.PAGE_WAIT_TIME)
+        try:
+            WebDriverWait(driver, max(self.PAGE_WAIT_TIME, 15)).until(
+                EC.presence_of_element_located((By.ID, "app"))
+            )
+        except Exception:
+            pass
+        time.sleep(self.PAGE_WAIT_TIME)
+
+        if not expected_user_id:
+            return
+        current = self._get_page_user_id(driver)
+        if current and current == expected_user_id:
+            return
+
+        logging.warning(
+            f"[{label}] 目标页户号 {current or '未知'} 与目标 {expected_user_id} 不一致，尝试页面内切换"
+        )
+        try:
+            self._choose_current_userid(driver, userid_index, target_user_id=expected_user_id)
+            time.sleep(self.PAGE_WAIT_TIME)
+        except Exception as exc:
+            logging.warning(f"[{label}] 页面内切换户号失败: {exc}")
+        current = self._get_page_user_id(driver)
+        if current and current != expected_user_id:
+            raise RuntimeError(
+                f"{label} 页面户号 {current} 与目标 {expected_user_id} 不一致"
+            )
+
+    def _get_payment_records(self, driver, user_id: str, userid_index: int):
+        """读取交费记录页的 payLists，默认查询去年至今的记录。"""
+        logging.info(f"[{user_id}] 正在获取交费记录...")
+        self._open_user_page(driver, PAYMENT_URL, userid_index, "payment", user_id)
+
+        try:
+            WebDriverWait(driver, max(self.PAGE_WAIT_TIME * 2, 20)).until(
+                lambda d: any(
+                    isinstance((component.get("data") or {}).get("payLists"), list)
+                    and bool((component.get("data") or {}).get("mixinGetYuEdata"))
+                    for component in vue_state.selected_vue_data(d) or []
+                )
+            )
+        except Exception:
+            logging.warning(f"[{user_id}] 交费记录组件加载超时")
+
+        existing = vue_state.normalize_payment_records(vue_state.selected_vue_data(driver))
+        start = os.getenv("PAYMENT_FETCH_START", "").strip() or f"{datetime.now().year - 1}-01-01"
+        end = datetime.now().strftime("%Y-%m-%d")
+        record_num = int(os.getenv("PAYMENT_FETCH_LIMIT", "200"))
+
+        script = """
+        const start = arguments[0];
+        const end = arguments[1];
+        const limit = arguments[2];
+        const vms = Array.from(document.querySelectorAll('*'))
+          .map((el) => el.__vue__)
+          .filter((vm) => vm && Array.isArray(vm.payLists) && typeof vm.getSearchRecords === 'function');
+        if (!vms.length) return { ok: false, reason: 'payment_vue_not_found' };
+        const vm = vms[0];
+        if (start) vm.begin = start;
+        if (end) vm.ending = end;
+        vm.pageNo = 1;
+        vm.recordNum = limit || 200;
+        vm.getSearchRecords();
+        return { ok: true, begin: vm.begin, ending: vm.ending };
+        """
+        try:
+            result = driver.execute_script(script, start, end, record_num)
+            logging.info(f"[{user_id}] 交费记录查询参数: {result}")
+        except Exception as exc:
+            logging.warning(f"[{user_id}] 触发交费记录查询失败: {exc}")
+            return existing
+
+        deadline = time.time() + int(os.getenv("PAYMENT_FETCH_TIMEOUT", "40"))
+        records = existing
+        while time.time() < deadline:
+            time.sleep(2)
+            records = vue_state.normalize_payment_records(vue_state.selected_vue_data(driver))
+            if records:
+                break
+        if len(records) < len(existing):
+            records = existing
+        logging.info(f"[{user_id}] 获取到 {len(records)} 条交费记录")
+        return records
+
+    def _visible_bill_entries(self, driver, year: int):
+        """返回 [(行元素, YYYY-MM)]，用于按月份打开账单详情。"""
+        entries = []
+        rows = driver.find_elements(By.XPATH, BILL_LIST_ROW)
+        for row in rows:
+            try:
+                text = row.text or ""
+            except Exception:
+                continue
+            match = re.search(r"(\d{4})[/-](\d{1,2})[/-]\d{1,2}", text)
+            if match:
+                entries.append((row, f"{int(match.group(1)):04d}-{int(match.group(2)):02d}"))
+                continue
+            match = re.search(r"(\d{1,2})月", text)
+            if match:
+                entries.append((row, f"{year:04d}-{int(match.group(1)):02d}"))
+        return entries
+
+    def _select_bill_year(self, driver, target_year: int) -> bool:
+        try:
+            active = driver.find_element(By.XPATH, BILL_ACTIVE_YEAR).text.strip()
+            if active == f"{target_year}年":
+                return True
+            option = WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(
+                EC.element_to_be_clickable((By.XPATH, bill_year_option(target_year)))
+            )
+            driver.execute_script("arguments[0].click();", option)
+            time.sleep(self.PAGE_WAIT_TIME)
+            WebDriverWait(driver, 20).until(
+                EC.visibility_of_element_located((By.XPATH, BILL_CARD))
+            )
+            return True
+        except Exception as exc:
+            logging.warning(f"切换到账单年份 {target_year} 失败: {exc}")
+            return False
+
+    def _expand_bill_summary(self, driver):
+        for _ in range(6):
+            buttons = driver.find_elements(By.XPATH, BILL_EXPAND_BUTTON)
+            if not buttons:
+                return
+            try:
+                previous_count = len(driver.find_elements(By.XPATH, BILL_LIST_ROW))
+                driver.execute_script("arguments[0].click();", buttons[0])
+                time.sleep(5)
+                current_count = len(driver.find_elements(By.XPATH, BILL_LIST_ROW))
+                if current_count <= previous_count:
+                    return
+            except Exception:
+                return
+
+    def _open_bill_row(self, driver, row) -> bool:
+        try:
+            arrow = row.find_element(By.XPATH, BILL_ROW_DETAIL_ARROW)
+            driver.execute_script("arguments[0].click();", arrow)
+            time.sleep(self.PAGE_WAIT_TIME)
+            WebDriverWait(driver, 20).until(
+                EC.visibility_of_element_located((By.XPATH, BILL_DETAIL_CYCLE))
+            )
+            return True
+        except Exception as exc:
+            logging.warning(f"打开账单详情失败: {exc}")
+            return False
+
+    def _save_official_bill(self, user_id: str, detail: dict, fallback_month: str = ""):
+        month = normalize_month(detail.get("month")) or fallback_month
+        if not month:
+            return None
+        detail["month"] = month
+        usage = to_float(detail.get("usage"))
+        charge = to_float(detail.get("charge"))
+        tou_values = [
+            to_float(detail.get(key))
+            for key in ("valley_usage", "flat_usage", "peak_usage", "tip_usage")
+        ]
+        if usage is None and charge is None and all(value is None for value in tou_values):
+            logging.warning(f"[{user_id}] {month} 账单详情没有电量/电费数据，暂不标记为官方账单")
+            return None
+        self.db.ensure_connected(user_id)
+        self.db.insert_monthly_bill(detail)
+        self.db.insert_monthly_data({
+            "month": month,
+            "total_usage": detail.get("usage"),
+            "total_charge": detail.get("charge"),
+            "valley_usage": detail.get("valley_usage"),
+            "flat_usage": detail.get("flat_usage"),
+            "peak_usage": detail.get("peak_usage"),
+            "tip_usage": detail.get("tip_usage"),
+            "source": "official",
+        })
+        # 账单里的 yearPq/yearAmt 只是“该账单月为止”的累计，不能直接写年度表；
+        # 年度汇总统一从月度表重新计算，避免 1 月账单把全年数据覆盖成 29 度。
+        self.db.refresh_yearly_from_monthly(month[:4])
+        logging.info(
+            f"[{user_id}] 官方账单已保存: {month}, 电量={detail.get('usage')}, "
+            f"电费={detail.get('charge')}, 阶梯={detail.get('ladder_num') or '-'}"
+        )
+        return detail
+
+    def _sync_bill_months(self, driver, user_id: str, userid_index: int, target_months: list[str]):
+        if not target_months:
+            return {}
+        target_year = int(target_months[0][:4])
+        logging.info(f"[{user_id}] 正在同步官方账单月份: {target_months}")
+        self._open_user_page(driver, BILL_SUMMARY_URL, userid_index, "bill_summary", user_id)
+        try:
+            WebDriverWait(driver, 20).until(
+                EC.visibility_of_element_located((By.XPATH, BILL_CARD))
+            )
+        except Exception:
+            logging.warning(f"[{user_id}] 电费账单页面加载失败")
+            return {}
+
+        self._select_bill_year(driver, target_year)
+        self._expand_bill_summary(driver)
+        entries = self._visible_bill_entries(driver, target_year)
+        if not entries:
+            logging.warning(f"[{user_id}] 账单页面没有可用的月份行")
+            return {}
+        logging.info(f"[{user_id}] 账单页可见月份: {[month for _, month in entries]}")
+
+        saved = {}
+        for month in target_months:
+            # driver.back() 后账单列表会重绘，之前拿到的行元素会失效，必须重新读取
+            entries = self._visible_bill_entries(driver, target_year)
+            entry_map = {entry_month: row for row, entry_month in entries}
+            row = entry_map.get(month)
+            if row is None:
+                logging.warning(f"[{user_id}] 账单页未找到月份 {month}，跳过")
+                continue
+            if not self._open_bill_row(driver, row):
+                # 页面可能刚好重绘，重新取一次行元素再试
+                entries = self._visible_bill_entries(driver, target_year)
+                entry_map = {entry_month: new_row for new_row, entry_month in entries}
+                row = entry_map.get(month)
+                if row is None or not self._open_bill_row(driver, row):
+                    continue
+            try:
+                components = vue_state.selected_vue_data(driver)
+                detail = vue_state.normalize_bill_detail_full(components, month)
+                if not detail.get("month"):
+                    detail["month"] = month
+                if normalize_month(detail.get("month")) == month:
+                    saved[month] = self._save_official_bill(user_id, detail, month)
+                else:
+                    logging.warning(
+                        f"[{user_id}] 账单详情月份({detail.get('month')})与目标({month})不一致，仍按目标月份保存"
+                    )
+                    saved[month] = self._save_official_bill(user_id, detail, month)
+            finally:
+                try:
+                    driver.back()
+                    time.sleep(self.PAGE_WAIT_TIME)
+                    WebDriverWait(driver, 20).until(
+                        EC.visibility_of_element_located((By.XPATH, BILL_CARD))
+                    )
+                    self._expand_bill_summary(driver)
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 返回账单列表失败: {exc}")
+                    break
+        return saved
+
+    def _get_tier_snapshot(self, driver, user_id: str, userid_index: int):
+        logging.info(f"[{user_id}] 正在获取官方阶梯用电状态...")
+        self._open_user_page(driver, STEP_URL, userid_index, "step", user_id)
+        deadline = time.time() + int(os.getenv("TIER_SYNC_TIMEOUT", "40"))
+        snapshot = {}
+        while time.time() < deadline:
+            components = vue_state.selected_vue_data(driver) or []
+            snapshot = vue_state.normalize_tier_snapshot(components)
+            if snapshot.get("one_level_pq") is not None or snapshot.get("level_flag") is not None:
+                break
+            time.sleep(2)
+        if snapshot.get("one_level_pq") is None and snapshot.get("level_flag") is None:
+            logging.warning(f"[{user_id}] 未获取到阶梯数据（可能不是阶梯用户）")
+            return None
+        snapshot["snapshot_date"] = datetime.now().strftime("%Y-%m-%d")
+        snapshot["source"] = "official"
+        logging.info(
+            f"[{user_id}] 官方阶梯: levelFlag={snapshot.get('level_flag')}, "
+            f"oneLevelPq={snapshot.get('one_level_pq')}, twoLevelPq={snapshot.get('two_level_pq')}, "
+            f"totalYearPq={snapshot.get('total_year_pq')}, totalMonthPq={snapshot.get('total_month_pq')}, "
+            f"ladderNum={snapshot.get('ladder_num')}"
+        )
+        return snapshot
+
+    def _query_daily_range(self, driver, start_date: str, end_date: str):
+        script = """
+        const start = arguments[0];
+        const end = arguments[1];
+        const candidates = Array.from(document.querySelectorAll('*'))
+          .map((el) => el.__vue__)
+          .filter((vm) => vm && typeof vm.getdata === 'function' && Array.isArray(vm.sevenEleList));
+        const vm = candidates.find((item) =>
+          Object.prototype.hasOwnProperty.call(item, 'start') &&
+          Object.prototype.hasOwnProperty.call(item, 'end')
+        ) || candidates[0];
+        if (!vm) return { ok: false, reason: 'daily_vue_component_not_found' };
+        vm.start = start;
+        vm.end = end;
+        vm.dateradio = '';
+        vm.sevenEleList = [];
+        vm.getdata();
+        return { ok: true, start: vm.start, end: vm.end };
+        """
+        result = driver.execute_script(script, start_date, end_date)
+        if not result or not result.get("ok"):
+            logging.warning(f"日用电量区间查询组件未找到: {result}")
+            return []
+        deadline = time.time() + int(os.getenv("DAILY_RANGE_TIMEOUT", "90"))
+        rows = []
+        while time.time() < deadline:
+            time.sleep(3)
+            rows = driver.execute_script(
+                """
+                const candidates = Array.from(document.querySelectorAll('*'))
+                  .map((el) => el.__vue__)
+                  .filter((vm) => vm && Array.isArray(vm.sevenEleList));
+                const vm = candidates.find((item) =>
+                  Object.prototype.hasOwnProperty.call(item, 'start') &&
+                  Object.prototype.hasOwnProperty.call(item, 'end')
+                ) || candidates[0];
+                if (!vm) return [];
+                return (vm.sevenEleList || []).map((row) => ({
+                  date: row.day,
+                  total_usage: row.dayElePq,
+                  valley_usage: row.thisVPq,
+                  flat_usage: row.thisNPq,
+                  peak_usage: row.thisPPq,
+                  tip_usage: row.thisTPq,
+                }));
+                """
+            ) or []
+            if rows:
+                break
+        return rows
+
+    def _fetch_daily_range(self, driver, user_id: str, userid_index: int, start_date: str, end_date: str):
+        logging.info(f"[{user_id}] 正在回补日用电量 {start_date} ~ {end_date}")
+        self._open_user_page(driver, ELECTRIC_USAGE_URL, userid_index, "daily_range", user_id)
+        try:
+            self._click_button(driver, By.XPATH, "//div[@class='el-tabs__nav is-top']/div[@id='tab-second']")
+            time.sleep(self.PAGE_WAIT_TIME)
+        except Exception:
+            pass
+
+        rows = self._query_daily_range(driver, start_date, end_date)
+        normalized = []
+        for row in rows:
+            row_date = normalize_date(row.get("date"))
+            if not row_date:
+                continue
+            values = [
+                to_float(row.get("total_usage")),
+                to_float(row.get("valley_usage")),
+                to_float(row.get("flat_usage")),
+                to_float(row.get("peak_usage")),
+                to_float(row.get("tip_usage")),
+            ]
+            if all(value is None for value in values):
+                continue
+            total = values[0]
+            if total is None:
+                total = sum(value or 0.0 for value in values[1:])
+            normalized.append({
+                "date": row_date,
+                "total_usage": total,
+                "valley_usage": values[1],
+                "flat_usage": values[2],
+                "peak_usage": values[3],
+                "tip_usage": values[4],
+            })
+        logging.info(f"[{user_id}] 区间查询返回 {len(rows)} 行，有效 {len(normalized)} 行")
+        return normalized
+
+    def _year_backfill_needed(self, year: int) -> bool:
+        if year in self._backfilled_years:
+            return False
+        if os.getenv("FORCE_YEAR_BACKFILL", "false").lower() == "true":
+            return True
+        today = date.today()
+        if today.year != year:
+            return False
+        start = date(year, 1, 1)
+        end = today - timedelta(days=1)
+        if end < start:
+            return False
+        expected = (end - start).days + 1
+        summary = self.db.get_daily_summary(start.isoformat(), end.isoformat())
+        covered = int(summary.get("count") or 0)
+        needed = covered < max(int(expected * 0.8), 10)
+        if needed:
+            logging.info(
+                f"[backfill] {year} 年日数据仅 {covered}/{expected} 天，需要回补"
+            )
+        return needed
+
+    def _backfill_year(self, driver, user_id: str, userid_index: int, year: int):
+        today = date.today()
+        start_text = os.getenv("YEAR_BACKFILL_START", f"{year}-01-01")
+        try:
+            start = date.fromisoformat(start_text)
+        except ValueError:
+            start = date(year, 1, 1)
+        end = today - timedelta(days=1)
+        if end < start:
+            return 0
+        chunk_days = max(int(os.getenv("YEAR_BACKFILL_CHUNK_DAYS", "90")), 7)
+        touched_months = set()
+        total_rows = 0
+        cursor = start
+        while cursor <= end:
+            chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
+            rows = self._fetch_daily_range(
+                driver, user_id, userid_index, cursor.isoformat(), chunk_end.isoformat()
+            )
+            self.db.ensure_connected(user_id)
+            for row in rows:
+                if self.db.insert_daily_data(row):
+                    touched_months.add(row["date"][:7])
+                    total_rows += 1
+            cursor = chunk_end + timedelta(days=1)
+
+        self.db.ensure_connected(user_id)
+        for month in sorted(touched_months):
+            self.db.sync_calculated_month_from_daily(month)
+        self.db.refresh_yearly_from_monthly(str(year))
+        self._backfilled_years.add(year)
+        logging.info(f"[{user_id}] 年度日数据回补完成: 写入 {total_rows} 条，涉及月份 {sorted(touched_months)}")
+        return total_rows
+
+    def _missing_bill_months(self, year: int) -> list[str]:
+        today = date.today()
+        last_closed = today.replace(day=1) - timedelta(days=1)
+        months = []
+        cursor = date(year, 1, 1)
+        while cursor <= last_closed:
+            months.append(cursor.strftime("%Y-%m"))
+            cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+        # 1 月 1 日时要补查上一年 12 月的账单
+        if last_closed.year < year:
+            months.insert(0, last_closed.strftime("%Y-%m"))
+        missing = [month for month in dict.fromkeys(months) if not self.db.has_official_bill(month)]
+        limit = int(os.getenv("BILL_SYNC_MAX_MONTHS", "12"))
+        return missing[:limit]
+
+    def _sync_extras(self, driver, user_id: str, userid_index: int, user_name: str = ""):
+        """交费记录、官方账单、阶梯状态、全年数据回补；返回 HA 需要的附加数据。"""
+        extras = {}
+        if self.db is None:
+            return extras
+        if not self.db.connect_user_db(user_id):
+            logging.warning(f"[{user_id}] 附加数据同步跳过：数据库连接失败")
+            return extras
+
+        today = date.today()
+        year = today.year
+        try:
+            if os.getenv("YEAR_BACKFILL_ENABLED", "true").lower() == "true" and self._year_backfill_needed(year):
+                try:
+                    self._backfill_year(driver, user_id, userid_index, year)
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 年度日数据回补失败: {exc}")
+
+            if os.getenv("BILL_SYNC_ENABLED", "true").lower() == "true":
+                try:
+                    if today.day == 1:
+                        logging.info(f"[{user_id}] 今天是每月 1 号，检查上个月电费账单")
+                    target_months = self._missing_bill_months(year)
+                    if target_months:
+                        self._sync_bill_months(driver, user_id, userid_index, target_months)
+                    else:
+                        logging.info(f"[{user_id}] 本年度官方账单已齐全，无需同步")
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 官方账单同步失败: {exc}")
+
+            if os.getenv("PAYMENT_FETCH_ENABLED", "true").lower() == "true":
+                try:
+                    self.db.ensure_connected(user_id)
+                    latest_payment = self.db.get_latest_payment()
+                    payment_interval = int(os.getenv("PAYMENT_FETCH_INTERVAL_DAYS", "7"))
+                    should_fetch_payment = latest_payment is None or today.day == 1
+                    if not should_fetch_payment and payment_interval > 0:
+                        last_pay_date = str(latest_payment.get("pay_date") or "")[:10]
+                        try:
+                            should_fetch_payment = (
+                                today - date.fromisoformat(last_pay_date)
+                            ).days >= payment_interval
+                        except ValueError:
+                            should_fetch_payment = True
+                    if should_fetch_payment:
+                        records = self._get_payment_records(driver, user_id, userid_index)
+                        self.db.ensure_connected(user_id)
+                        for record in records:
+                            record["user_name"] = user_name
+                            self.db.insert_payment(record)
+                        if records:
+                            logging.info(f"[{user_id}] 交费记录已写入 {len(records)} 条")
+                    else:
+                        logging.info(f"[{user_id}] 交费记录最近已同步，跳过")
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 交费记录同步失败: {exc}")
+
+            if os.getenv("TIER_SYNC_ENABLED", "true").lower() == "true":
+                try:
+                    self.db.ensure_connected(user_id)
+                    snapshot = self.db.get_latest_tier_snapshot()
+                    should_fetch_tier = (
+                        today.day == 1
+                        or snapshot is None
+                        or str(snapshot.get("snapshot_date") or "")[:7] != today.strftime("%Y-%m")
+                    )
+                    if should_fetch_tier:
+                        snapshot = self._get_tier_snapshot(driver, user_id, userid_index)
+                        if snapshot:
+                            self.db.ensure_connected(user_id)
+                            self.db.insert_tier_snapshot(snapshot)
+                    else:
+                        logging.info(f"[{user_id}] 本月官方阶梯已同步，跳过")
+                except Exception as exc:
+                    logging.warning(f"[{user_id}] 官方阶梯状态同步失败: {exc}")
+            try:
+                self.db.ensure_connected(user_id)
+                self.db.touch_user_data(user_id)
+            except Exception as exc:
+                logging.warning(f"[{user_id}] 更新数据更新时间失败: {exc}")
+        finally:
+            self.db.close_connect()
+        return extras
+
     @staticmethod
     def _format_month(value, year_hint: str):
         """把国网页面上的月份文本格式化为 YYYY-MM。
@@ -1019,6 +1708,11 @@ class DataFetcher:
         没有年份时使用调用方传入的页面年份，避免 1 月查询上年数据时年份错位。
         """
         text = str(value or "").strip()
+        # 页面常见格式："2026-01-01 00:00:00.0-2026-01-31 00:00:00.0"
+        # 或 "2026-08-01-2026-08-31"，取第一个年月即可
+        match = re.search(r"(\d{4})[-/](\d{1,2})", text)
+        if match:
+            return f"{match.group(1)}-{int(match.group(2)):02d}"
         match = re.search(r'(\d{1,2})月', text)
         if match:
             return f"{year_hint}-{int(match.group(1)):02d}"
@@ -1040,6 +1734,9 @@ class DataFetcher:
         page_year = normalize_year((tou_data or {}).get("year")) or str(
             datetime.now().year - 1 if datetime.now().month == 1 else datetime.now().year
         )
+        # 日常只核对最近 N 天；首次全年回补由 _backfill_year 单独完成
+        reconcile_days = max(int(os.getenv("DAILY_RECONCILE_DAYS", "7")), 1)
+        daily_cutoff = (datetime.now() - timedelta(days=reconcile_days)).date().isoformat()
         try:
             self.db.upsert_user(user_id, self._username, user_name)
             logging.info(f"[{user_id}] 用户信息已更新 (user_name={user_name})")
@@ -1058,6 +1755,9 @@ class DataFetcher:
             # 写入每日用电量（DOM 方式）
             if date_list:
                 for i in range(len(date_list)):
+                    row_date = normalize_date(date_list[i])
+                    if row_date and row_date < daily_cutoff:
+                        continue
                     try:
                         self.db.insert_daily_data({
                             "date": date_list[i],
@@ -1072,6 +1772,9 @@ class DataFetcher:
             if tou_data and tou_data.get("daily"):
                 tou_count = 0
                 for row in tou_data["daily"]:
+                    row_date = normalize_date(row.get("date"))
+                    if row_date and row_date < daily_cutoff:
+                        continue
                     try:
                         row["user_name"] = user_name
                         self.db.insert_daily_data(row)
@@ -1176,6 +1879,7 @@ class DataFetcher:
 
             # 数据清理
             self.db.cleanup_old_data()
+            self.db.touch_user_data(user_id)
             logging.info(f"[{user_id}] 数据清理完成")
 
         except Exception as e:

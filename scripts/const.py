@@ -4,6 +4,9 @@ import os
 LOGIN_URL = "https://95598.cn/osgweb/login"
 ELECTRIC_USAGE_URL = "https://95598.cn/osgweb/electricityCharge"
 BALANCE_URL = "https://95598.cn/osgweb/userAcc"
+PAYMENT_URL = "https://95598.cn/osgweb/paymentRecord"
+BILL_SUMMARY_URL = "https://95598.cn/osgweb/electricitySummary"
+STEP_URL = "https://95598.cn/osgweb/stepElectricityConsumption"
 
 LLM_API_KEY = os.getenv('LLM_API_KEY', '').strip()
 LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3')

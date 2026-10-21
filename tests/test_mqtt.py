@@ -59,6 +59,7 @@ def test_ha_discovery_payload_uses_legacy_entity_ids():
     assert payload["state_topic"] == "sgcc_electricity/1234567890123/last_electricity_usage/state"
     assert payload["device"]["identifiers"] == ["sgcc_electricity_1234567890123"]
     assert payload["device"]["name"] == "国网电费 家庭用电"
+    assert payload["device"]["serial_number"] == "1234567890123"
     assert payload.get("state_class") == "measurement"
     assert "last_reset_value_template" not in payload
 
@@ -109,6 +110,8 @@ def test_sensor_updator_publishes_balance_usage_and_tou(tmp_path, monkeypatch):
     )
 
     assert fake.state_payload(user_id, "electricity_charge_balance")["state"] == 729.68
+    assert fake.state_payload(user_id, "electricity_charge_balance")["user_id"] == user_id
+    assert fake.state_payload(user_id, "electricity_charge_balance")["user_name"] == "家庭用电"
     daily = fake.state_payload(user_id, "last_electricity_usage")
     assert daily["state"] == 16.06
     assert daily["last_daily_date"] == yesterday
@@ -186,9 +189,216 @@ def test_date_utils_handles_state_grid_formats():
     assert normalize_month("202609") == "2026-09"
 
 
+def test_sensor_updator_publishes_payment_and_tier(tmp_path, monkeypatch):
+    updator, fake = _build_updator(tmp_path, monkeypatch)
+    user_id = "1234567890123"
+    tier_state = {
+        "year": "2026",
+        "month": "2026-10",
+        "previous_months_usage": 2250.0,
+        "current_month_usage": 300.0,
+        "total_usage": 2550.0,
+        "tier": 2,
+        "tier_name": "第二阶梯",
+        "range_start": 2160.0,
+        "range_end": 4200.0,
+        "range_label": "2161-4200",
+        "remaining_usage": 1650.0,
+        "used_in_tier": 390.0,
+        "progress_percent": 19.12,
+        "thresholds": {"tier1_max": 2160.0, "tier2_max": 4200.0},
+        "current_month_source": "daily_sum",
+    }
+    tier_official = {
+        "snapshot_date": "2026-10-21",
+        "level_flag": 2,
+        "one_level_pq": 2160.0,
+        "two_level_pq": 2040.0,
+        "total_year_pq": 2550.0,
+        "ladder": "年",
+        "ladder_num": "二",
+        "official_tier": 2,
+    }
+    month_bill = {
+        "stat_month": "2026-09",
+        "total_usage": 131.0,
+        "total_charge": 78.6,
+        "valley_usage": 50.0,
+        "flat_usage": 40.0,
+        "peak_usage": 35.0,
+        "tip_usage": 6.0,
+        "begin_date": "2026-09-01",
+        "end_date": "2026-09-30",
+        "issue_date": "2026-10-01",
+        "year_usage": 556.0,
+        "year_charge": 333.6,
+        "level_flag": 2,
+        "one_level_pq": 2160.0,
+        "two_level_pq": 2040.0,
+        "ladder_num": "二",
+    }
+    updator.update_one_userid(
+        user_id=user_id,
+        balance=729.68,
+        last_daily_date="2026-10-20",
+        last_daily_usage=16.06,
+        yearly_charge=333.6,
+        yearly_usage=556.0,
+        month_charge=78.6,
+        month_usage=131.0,
+        month_period="2026-10",
+        payment_record={
+            "pay_date": "2026-10-01 08:00:00",
+            "amount": 200.0,
+            "pay_mode": "微信",
+            "total_rep_amt": 0.0,
+        },
+        month_bill=month_bill,
+        tier_state=tier_state,
+        tier_official=tier_official,
+        user_name="家庭用电",
+    )
+
+    payment = fake.state_payload(user_id, "last_payment_amount")
+    assert payment["state"] == 200.0
+    assert payment["pay_mode"] == "微信"
+    assert payment["user_id"] == user_id
+    assert payment["user_name"] == "家庭用电"
+    payment_date = fake.state_payload(user_id, "last_payment_date")
+    assert payment_date["state"] == "2026-10-01T08:00:00+08:00"
+    assert fake.discovery_payload(user_id, "last_payment_date")["device_class"] == "timestamp"
+
+    tier = fake.state_payload(user_id, "current_electricity_tier")
+    assert tier["state"] == 2
+    assert tier["user_id"] == user_id
+    assert tier["user_name"] == "家庭用电"
+    assert tier["tier_name"] == "第二阶梯"
+    assert tier["range"] == "2161-4200"
+    assert tier["official_tier"] == 2
+    assert fake.state_payload(user_id, "current_tier_usage")["state"] == 2550.0
+    assert fake.state_payload(user_id, "current_tier_remaining")["state"] == 1650.0
+
+    month_usage = fake.state_payload(user_id, "month_electricity_usage")
+    assert month_usage["state"] == 131.0
+    assert month_usage["period"] == "2026-09"
+    assert month_usage["source"] == "official"
+    assert month_usage["begin_date"] == "2026-09-01"
+    assert fake.state_payload(user_id, "month_peak_usage")["period"] == "2026-09"
+    assert fake.state_payload(user_id, "month_peak_usage")["source"] == "official"
+
+
+def test_sensor_updator_publishes_from_database(tmp_path, monkeypatch):
+    from datetime import date, timedelta
+
+    from db import SqliteDB
+
+    monkeypatch.setenv("DB_NAME", str(tmp_path / "publish.db"))
+    monkeypatch.setenv("DATA_RETENTION_DAYS", "0")
+    user_id = "1234567890123"
+    today = date.today()
+    previous_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    yesterday = (today - timedelta(days=1)).isoformat()
+
+    db = SqliteDB()
+    assert db.connect_user_db(user_id) is True
+    try:
+        db.upsert_user(user_id, "13800000000", "家庭用电")
+        db.insert_balance_log({
+            "balance": 729.68,
+            "amount_due": 0.0,
+            "as_of": f"{today.isoformat()} 10:00:00",
+        })
+        db.insert_daily_data({
+            "date": yesterday,
+            "total_usage": 16.06,
+            "valley_usage": 5.1,
+            "flat_usage": 4.2,
+            "peak_usage": 5.7,
+            "tip_usage": 1.06,
+        })
+        db.insert_monthly_bill({
+            "month": previous_month,
+            "total_usage": 131.0,
+            "total_charge": 78.6,
+            "valley_usage": 50.0,
+            "flat_usage": 40.0,
+            "peak_usage": 35.0,
+            "tip_usage": 6.0,
+            "year_usage": 556.0,
+            "year_charge": 333.6,
+            "level_flag": 2,
+            "one_level_pq": 2160.0,
+            "two_level_pq": 2040.0,
+            "ladder_num": "二",
+        })
+        db.insert_monthly_data({
+            "month": previous_month,
+            "total_usage": 131.0,
+            "total_charge": 78.6,
+            "valley_usage": 50.0,
+            "flat_usage": 40.0,
+            "peak_usage": 35.0,
+            "tip_usage": 6.0,
+            "source": "official",
+        })
+        db.insert_yearly_data({
+            "year": str(today.year),
+            "total_usage": 556.0,
+            "total_charge": 333.6,
+            "source": "official",
+        })
+        db.insert_payment({
+            "pay_date": f"{today.isoformat()} 08:30:00",
+            "amount": 200.0,
+            "pay_mode": "微信",
+        })
+        db.insert_tier_snapshot({
+            "snapshot_date": today.isoformat(),
+            "level_flag": 2,
+            "one_level_pq": 2160.0,
+            "two_level_pq": 2040.0,
+            "total_year_pq": 147.06,
+            "ladder": "年",
+            "ladder_num": "一",
+            "official_tier": 1,
+        })
+        db.touch_user_data(user_id)
+    finally:
+        db.close_connect()
+
+    updator, fake = _build_updator(tmp_path, monkeypatch)
+    assert updator.publish_all_from_db(db, notify=False) is True
+
+    assert fake.state_payload(user_id, "electricity_charge_balance")["state"] == 729.68
+    daily = fake.state_payload(user_id, "last_electricity_usage")
+    assert daily["state"] == 16.06
+    assert daily["last_daily_date"] == yesterday
+    assert fake.state_payload(user_id, "last_valley_electricity_usage")["state"] == 5.1
+    assert fake.state_payload(user_id, "yearly_electricity_usage")["state"] == 556.0
+
+    month_usage = fake.state_payload(user_id, "month_electricity_usage")
+    assert month_usage["state"] == 131.0
+    assert month_usage["period"] == previous_month
+    assert month_usage["source"] == "official"
+    assert fake.state_payload(user_id, "month_peak_usage")["state"] == 35.0
+
+    assert fake.state_payload(user_id, "last_payment_amount")["state"] == 200.0
+    assert fake.state_payload(user_id, "last_payment_amount")["user_id"] == user_id
+    updated = fake.state_payload(user_id, "data_updated_at")
+    assert updated["state"].endswith("+08:00")
+    assert fake.discovery_payload(user_id, "data_updated_at")["device_class"] == "timestamp"
+    tier = fake.state_payload(user_id, "current_electricity_tier")
+    assert tier["state"] == 1
+    assert tier["official_tier"] == 1
+    expected_tier_usage = (131.0 if today.month > 1 else 0.0) + (16.06 if today.day > 1 else 0.0)
+    assert fake.state_payload(user_id, "current_tier_usage")["state"] == expected_tier_usage
+
+
 def test_all_sensor_specs_have_required_fields():
+    unitless = {"last_payment_date", "data_updated_at", "current_electricity_tier"}
     for key, spec in SENSOR_SPECS.items():
         assert spec["label"]
-        assert spec["unit"]
-        assert spec["device_class"]
+        if key not in unitless:
+            assert spec["unit"]
+            assert spec["device_class"]
         assert "icon" in spec
