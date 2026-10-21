@@ -292,3 +292,16 @@ def test_sqlite_calculated_month_from_daily_and_yearly_refresh(tmp_path, monkeyp
         cursor.close()
     finally:
         db.close_connect()
+
+
+def test_sqlite_daily_dates_reports_present_dates(tmp_path, monkeypatch):
+    db = _make_db(tmp_path, monkeypatch)
+    try:
+        db.insert_daily_data({"date": "2026-09-01", "total_usage": 1.0})
+        db.insert_daily_data({"date": "2026-09-03", "total_usage": 1.0})
+        assert db.get_daily_dates("2026-09-01", "2026-09-03") == {
+            "2026-09-01",
+            "2026-09-03",
+        }
+    finally:
+        db.close_connect()

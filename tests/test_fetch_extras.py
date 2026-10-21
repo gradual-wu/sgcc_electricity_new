@@ -68,3 +68,24 @@ def test_sync_extras_persists_payment_tier_and_reads_previous_bill(tmp_path, mon
         assert snapshot["level_flag"] == 2
     finally:
         fetcher.db.close_connect()
+
+
+def test_daily_gaps_and_closed_bill_months(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_TYPE", "sqlite")
+    monkeypatch.setenv("DB_NAME", str(tmp_path / "gaps.db"))
+    monkeypatch.setenv("DATA_RETENTION_DAYS", "0")
+    fetcher = DataFetcher("user", "pass")
+    user_id = "1234567890123"
+    assert fetcher.db.connect_user_db(user_id) is True
+    try:
+        fetcher.db.insert_daily_data({"date": "2026-09-01", "total_usage": 1.0})
+        fetcher.db.insert_daily_data({"date": "2026-09-03", "total_usage": 1.0})
+        gaps = fetcher._daily_gaps(date(2026, 9, 1), date(2026, 9, 3))
+        assert gaps == [[date(2026, 9, 2), date(2026, 9, 2)]]
+    finally:
+        fetcher.db.close_connect()
+
+    today = date.today()
+    months = fetcher._closed_bill_months(today.year)
+    if today.month > 1:
+        assert f"{today.year}-01" in months

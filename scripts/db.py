@@ -307,6 +307,9 @@ class DB:
     def get_daily_summary(self, start_date: str, end_date: str) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def get_daily_dates(self, start_date: str, end_date: str) -> set[str]:
+        raise NotImplementedError
+
     def cleanup_old_data(self) -> None:
         raise NotImplementedError
 
@@ -1740,6 +1743,32 @@ class MysqlDB(DB):
             logging.error("读取用户列表失败: %s", exc)
             return []
 
+    def get_daily_dates(self, start_date: str, end_date: str) -> set[str]:
+        start = normalize_date(start_date)
+        end = normalize_date(end_date)
+        if not start or not end:
+            return set()
+        try:
+            cursor = self._cursor()
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT `stat_date` FROM `{self.DAILY_TABLE}`
+                    WHERE `user_id` = %s AND `stat_date` BETWEEN %s AND %s
+                    """,
+                    (self.user_id, start, end),
+                )
+                return {
+                    normalize_date(row[0])
+                    for row in cursor.fetchall()
+                    if row[0] is not None
+                }
+            finally:
+                cursor.close()
+        except Exception as exc:
+            logging.error("读取日数据日期失败: %s", exc)
+            return set()
+
 
 class SqliteDB(DB):
     def _resolve_db_path(self) -> str:
@@ -2910,3 +2939,29 @@ class SqliteDB(DB):
         except Exception as exc:
             logging.error("读取用户列表失败: %s", exc)
             return []
+
+    def get_daily_dates(self, start_date: str, end_date: str) -> set[str]:
+        start = normalize_date(start_date)
+        end = normalize_date(end_date)
+        if not start or not end:
+            return set()
+        try:
+            cursor = self._cursor()
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT stat_date FROM {self.DAILY_TABLE}
+                    WHERE user_id = ? AND stat_date BETWEEN ? AND ?
+                    """,
+                    (self.user_id, start, end),
+                )
+                return {
+                    normalize_date(row[0])
+                    for row in cursor.fetchall()
+                    if row[0] is not None
+                }
+            finally:
+                cursor.close()
+        except Exception as exc:
+            logging.error("读取日数据日期失败: %s", exc)
+            return set()

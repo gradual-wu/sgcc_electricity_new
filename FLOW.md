@@ -127,7 +127,7 @@ sequenceDiagram
 
 | 触发 | 动作 | 是否访问国网 |
 |---|---|---|
-| 进程启动 | 从数据库发布；数据库为空才抓取 | 仅数据库为空时 |
+| 进程启动 | 从数据库发布；数据库为空或 `FORCE_FULL_REFRESH=true` 时抓取 | 是（仅上述条件） |
 | 每天 `JOB_START_TIME`（默认 07:00，随机 ±10 分钟） | 日常抓取 + 发布 | 是 |
 | 每天 `JOB_START_TIME + 12h` | 日常抓取 + 发布 | 是 |
 | 每 5 分钟 | 从数据库重新发布 | 否 |
@@ -535,7 +535,7 @@ db.ensure_connected(user_id)
 
 ### 5.3 发布时机
 
-- `main.py` 启动时：先从数据库发布；数据库没有数据才抓取。
+- `main.py` 启动时：先从数据库发布；数据库没有数据或 `FORCE_FULL_REFRESH=true` 才抓取。
 - 每天 `JOB_START_TIME`（默认 07:00，随机 ±10 分钟）和 12 小时后各抓取一次。
 - 每 5 分钟：只从数据库重发一次，不访问国网。
 - 抓取完成后：`run_task()` 调用 `publish_all_from_db()`。
@@ -553,8 +553,9 @@ db.ensure_connected(user_id)
 | `PAYMENT_FETCH_INTERVAL_DAYS` | `7` | 交费记录同步间隔（1 号总会同步） |
 | `BILL_SYNC_MAX_MONTHS` | `12` | 单次最多补查月份 |
 | `YEAR_BACKFILL_ENABLED` | `true` | 是否允许首次全年回补 |
-| `YEAR_BACKFILL_CHUNK_DAYS` | `90` | 全年回补分段天数 |
+| `YEAR_BACKFILL_CHUNK_DAYS` | `30` | 全年回补分段天数（分段过大会漏天数） |
 | `FORCE_YEAR_BACKFILL` | `false` | 强制重新回补当年日数据 |
+| `FORCE_FULL_REFRESH` | `false` | 强制全量刷新日数据 + 官方账单 + 交费 + 阶梯；跑完改回 `false` |
 | `TIER1_MAX` / `TIER2_MAX` | `2160` / `4200` | 阶梯边界 |
 | `PAGE_WAIT_TIME` | `10` | 数据页操作等待秒数 |
 | `HASS_WWW_DIR` | `/config/www` | 二维码图片保存目录，HA 通过 `/local/` 访问 |

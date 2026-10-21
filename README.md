@@ -247,6 +247,8 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `PAGE_WAIT_TIME` | 数据页操作等待秒数，默认 `10` |
 | `TIER1_MAX` / `TIER2_MAX` | 阶梯边界，默认 `2160` / `4200` |
 | `YEAR_BACKFILL_ENABLED` / `FORCE_YEAR_BACKFILL` | 是否允许/强制全年日数据回补 |
+| `YEAR_BACKFILL_CHUNK_DAYS` | 全年回补分段天数，默认 `30` |
+| `FORCE_FULL_REFRESH` | 强制全量刷新：全年日数据 + 官方账单 + 交费记录 + 阶梯快照；启动时立即执行，跑完请改回 `false` |
 | `LLM_API_KEY` | 大模型 API Key |
 | `LLM_BASE_URL` | 大模型接口地址（火山引擎留空使用默认值） |
 | `LLM_MODEL` | 模型名称，如 `ep-2025xxxxxx-xxxxx`（火山引擎接入点 ID） |
