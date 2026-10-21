@@ -91,6 +91,30 @@ def test_daily_gaps_and_closed_bill_months(tmp_path, monkeypatch):
         assert f"{today.year}-01" in months
 
 
+def test_missing_plan_reports_gaps_bills_payment_tier(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_TYPE", "sqlite")
+    monkeypatch.setenv("DB_NAME", str(tmp_path / "plan.db"))
+    monkeypatch.setenv("DATA_RETENTION_DAYS", "0")
+    monkeypatch.setenv("YEAR_BACKFILL_START", "2026-09-01")
+    fetcher = DataFetcher("user", "pass")
+    user_id = "1234567890123"
+    assert fetcher.db.connect_user_db(user_id) is True
+    try:
+        fetcher.db.insert_daily_data({"date": "2026-09-01", "total_usage": 1.0})
+        fetcher.db.insert_daily_data({"date": "2026-09-03", "total_usage": 1.0})
+        fetcher._daily_gaps = lambda start, end: [
+            [date(2026, 9, 2), date(2026, 9, 2)]
+        ]
+        plan = fetcher._missing_plan(user_id, 2026, date(2026, 10, 21))
+        assert plan["daily_gaps"] == [[date(2026, 9, 2), date(2026, 9, 2)]]
+        assert plan["daily_missing_days"] == 1
+        assert "2026-01" in plan["missing_bills"]
+        assert plan["payment_reason"] == "数据库无交费记录"
+        assert plan["tier_reason"] == "无阶梯快照"
+    finally:
+        fetcher.db.close_connect()
+
+
 def test_fill_daily_gaps_only_fetches_missing_range(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_TYPE", "sqlite")
     monkeypatch.setenv("DB_NAME", str(tmp_path / "fill.db"))

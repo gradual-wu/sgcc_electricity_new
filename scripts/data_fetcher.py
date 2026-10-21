@@ -1392,7 +1392,7 @@ class DataFetcher:
         if not target_months:
             return {}
         target_year = int(target_months[0][:4])
-        logging.info(f"[{user_id}] 正在同步官方账单月份: {target_months}")
+        logging.info(f"[{user_id}] 需要补官方账单月份: {target_months}")
         self._open_user_page(driver, BILL_SUMMARY_URL, userid_index, "bill_summary", user_id)
         try:
             WebDriverWait(driver, 20).until(
@@ -1656,6 +1656,56 @@ class DataFetcher:
             cursor += timedelta(days=1)
         return gaps
 
+    def _missing_plan(self, user_id: str, year: int, today: date) -> dict:
+        """只读扫描数据库，返回本次补缺计划，供日志展示。"""
+        start_text = os.getenv("YEAR_BACKFILL_START", f"{year}-01-01")
+        try:
+            start = date.fromisoformat(start_text)
+        except ValueError:
+            start = date(year, 1, 1)
+        end = today - timedelta(days=1)
+        gaps = self._daily_gaps(start, end) if end >= start else []
+        missing_days = sum((gap_end - gap_start).days + 1 for gap_start, gap_end in gaps)
+        missing_bills = self._missing_bill_months(year)
+
+        latest_payment = self.db.get_latest_payment()
+        payment_interval = int(os.getenv("PAYMENT_FETCH_INTERVAL_DAYS", "7"))
+        if latest_payment is None:
+            payment_reason = "数据库无交费记录"
+        elif today.day == 1:
+            payment_reason = "每月 1 号"
+        else:
+            last_pay_date = str(latest_payment.get("pay_date") or "")[:10]
+            try:
+                days = (today - date.fromisoformat(last_pay_date)).days
+            except ValueError:
+                days = payment_interval
+            payment_reason = (
+                f"最近缴费 {last_pay_date}，已 {days} 天"
+                if days >= payment_interval
+                else "最近已同步，跳过"
+            )
+
+        snapshot = self.db.get_latest_tier_snapshot()
+        if snapshot is None:
+            tier_reason = "无阶梯快照"
+        elif str(snapshot.get("snapshot_date") or "")[:7] != today.strftime("%Y-%m"):
+            tier_reason = (
+                f"快照月份 {snapshot.get('snapshot_date')} 不是当前月"
+            )
+        elif today.day == 1:
+            tier_reason = "每月 1 号"
+        else:
+            tier_reason = "本月已同步，跳过"
+
+        return {
+            "daily_gaps": gaps,
+            "daily_missing_days": missing_days,
+            "missing_bills": missing_bills,
+            "payment_reason": payment_reason,
+            "tier_reason": tier_reason,
+        }
+
     def _fill_daily_gaps(self, driver, user_id: str, userid_index: int, year: int) -> int:
         """只补数据库里缺失的日数据和缺失的 calculated 月度行，不重拉已有数据。"""
         today = date.today()
@@ -1670,10 +1720,13 @@ class DataFetcher:
 
         gaps = self._daily_gaps(start, end)
         if gaps:
+            missing_days = sum((gap_end - gap_start).days + 1 for gap_start, gap_end in gaps)
             logging.info(
-                f"[{user_id}] FILL_MISSING_DATA 日数据缺口: "
-                f"{[(str(a), str(b)) for a, b in gaps]}"
+                f"[{user_id}] 需要补日数据: "
+                f"{[(str(a), str(b)) for a, b in gaps]}，共 {missing_days} 天"
             )
+        else:
+            logging.info(f"[{user_id}] 日数据无缺口，跳过")
         total_rows = 0
         touched_months = set()
         for gap_start, gap_end in gaps:
@@ -1769,6 +1822,23 @@ class DataFetcher:
             )
         elif fill_missing:
             logging.info(f"[{user_id}] FILL_MISSING_DATA=true：扫描数据库，只补缺失数据")
+            try:
+                self.db.ensure_connected(user_id)
+                plan = self._missing_plan(user_id, year, today)
+                gap_text = [(str(a), str(b)) for a, b in plan["daily_gaps"]]
+                logging.info(f"[{user_id}] FILL_MISSING_DATA 计划:")
+                logging.info(
+                    f"[{user_id}]   日数据: {len(plan['daily_gaps'])} 段 / "
+                    f"{plan['daily_missing_days']} 天 {gap_text if gap_text else '无缺口'}"
+                )
+                logging.info(
+                    f"[{user_id}]   官方账单: "
+                    f"{plan['missing_bills'] if plan['missing_bills'] else '无缺失'}"
+                )
+                logging.info(f"[{user_id}]   交费记录: {plan['payment_reason']}")
+                logging.info(f"[{user_id}]   阶梯快照: {plan['tier_reason']}")
+            except Exception as exc:
+                logging.warning(f"[{user_id}] 扫描缺失数据失败: {exc}")
         try:
             if force_full:
                 try:
@@ -1808,16 +1878,26 @@ class DataFetcher:
                     self.db.ensure_connected(user_id)
                     latest_payment = self.db.get_latest_payment()
                     payment_interval = int(os.getenv("PAYMENT_FETCH_INTERVAL_DAYS", "7"))
-                    should_fetch_payment = force_full or latest_payment is None or today.day == 1
-                    if not should_fetch_payment and payment_interval > 0:
+                    if latest_payment is None:
+                        should_fetch_payment = True
+                        payment_reason = "数据库无交费记录"
+                    elif force_full:
+                        should_fetch_payment = True
+                        payment_reason = "FORCE_FULL_REFRESH"
+                    elif today.day == 1:
+                        should_fetch_payment = True
+                        payment_reason = "每月 1 号"
+                    else:
                         last_pay_date = str(latest_payment.get("pay_date") or "")[:10]
                         try:
-                            should_fetch_payment = (
-                                today - date.fromisoformat(last_pay_date)
-                            ).days >= payment_interval
+                            days = (today - date.fromisoformat(last_pay_date)).days
+                            should_fetch_payment = days >= payment_interval
+                            payment_reason = f"最近缴费 {last_pay_date}，已 {days} 天"
                         except ValueError:
                             should_fetch_payment = True
+                            payment_reason = "无法解析最近缴费日期"
                     if should_fetch_payment:
+                        logging.info(f"[{user_id}] 需要同步交费记录: {payment_reason}")
                         records = self._get_payment_records(driver, user_id, userid_index)
                         self.db.ensure_connected(user_id)
                         for record in records:
@@ -1826,7 +1906,7 @@ class DataFetcher:
                         if records:
                             logging.info(f"[{user_id}] 交费记录已写入 {len(records)} 条")
                     else:
-                        logging.info(f"[{user_id}] 交费记录最近已同步，跳过")
+                        logging.info(f"[{user_id}] 交费记录跳过: {payment_reason}")
                 except Exception as exc:
                     logging.warning(f"[{user_id}] 交费记录同步失败: {exc}")
 
@@ -1834,19 +1914,32 @@ class DataFetcher:
                 try:
                     self.db.ensure_connected(user_id)
                     snapshot = self.db.get_latest_tier_snapshot()
-                    should_fetch_tier = (
-                        force_full
-                        or today.day == 1
-                        or snapshot is None
-                        or str(snapshot.get("snapshot_date") or "")[:7] != today.strftime("%Y-%m")
-                    )
+                    current_month_key = today.strftime("%Y-%m")
+                    if force_full:
+                        should_fetch_tier = True
+                        tier_reason = "FORCE_FULL_REFRESH"
+                    elif snapshot is None:
+                        should_fetch_tier = True
+                        tier_reason = "无阶梯快照"
+                    elif str(snapshot.get("snapshot_date") or "")[:7] != current_month_key:
+                        should_fetch_tier = True
+                        tier_reason = (
+                            f"快照月份 {snapshot.get('snapshot_date')} 不是 {current_month_key}"
+                        )
+                    elif today.day == 1:
+                        should_fetch_tier = True
+                        tier_reason = "每月 1 号"
+                    else:
+                        should_fetch_tier = False
+                        tier_reason = "本月已同步"
                     if should_fetch_tier:
+                        logging.info(f"[{user_id}] 需要同步阶梯快照: {tier_reason}")
                         snapshot = self._get_tier_snapshot(driver, user_id, userid_index)
                         if snapshot:
                             self.db.ensure_connected(user_id)
                             self.db.insert_tier_snapshot(snapshot)
                     else:
-                        logging.info(f"[{user_id}] 本月官方阶梯已同步，跳过")
+                        logging.info(f"[{user_id}] 阶梯快照跳过: {tier_reason}")
                 except Exception as exc:
                     logging.warning(f"[{user_id}] 官方阶梯状态同步失败: {exc}")
             try:
