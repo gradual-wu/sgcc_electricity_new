@@ -71,6 +71,12 @@ configuration:
   JOB_START_TIME:
     name: 每日抓取时间
     description: 每日抓取时间，另加 12 小时后执行一次。
+  LOG_LEVEL:
+    name: 日志级别
+    description: DEBUG / INFO / WARNING / ERROR。
+  HEARTBEAT_LOG_MINUTES:
+    name: 心跳日志间隔
+    description: 每隔多少分钟输出一次心跳日志，用于确认插件仍在运行。
   RETRY_WAIT_TIME_OFFSET_UNIT:
     name: 登录/页面等待
     description: 登录和页面操作后的等待秒数。

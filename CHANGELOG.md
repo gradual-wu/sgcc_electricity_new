@@ -1,5 +1,16 @@
 # Changelog
 
+## [v1.15.2] - 2026-10-21
+
+### Fixed
+
+- 启动时先建立 stdout 日志，避免读取 `options.json` / 环境变量阶段的日志丢失。
+- `logger_init` 清理旧 handler、校验日志级别，防止重复或静默。
+- 启动时输出不含敏感信息的配置摘要（数据库、MQTT、抓取窗口、实体 ID 风格、刷新模式）。
+- 新增 `HEARTBEAT_LOG_MINUTES` 心跳日志，默认每 30 分钟输出一次，便于确认加载项仍在运行。
+- 调度循环异常不再导致进程静默退出，会记录 traceback 并继续。
+- 新增 `LOG_LEVEL` 配置项，默认 `INFO`。
+
 ## [v1.15.1] - 2026-10-21
 
 ### Documentation

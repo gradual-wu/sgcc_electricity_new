@@ -550,6 +550,8 @@ db.ensure_connected(user_id)
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `JOB_START_TIME` | `07:00` | 每日抓取时间，另加 12 小时一次 |
+| `LOG_LEVEL` | `INFO` | 日志级别 |
+| `HEARTBEAT_LOG_MINUTES` | `30` | 心跳日志间隔，确认插件仍在运行 |
 | `DAILY_FETCH_DAYS` | `7` | 页面日数据抓取窗口 |
 | `DAILY_RECONCILE_DAYS` | `7` | 日常写库只核对最近 N 天 |
 | `PAYMENT_FETCH_INTERVAL_DAYS` | `7` | 交费记录同步间隔（1 号总会同步） |
@@ -617,6 +619,25 @@ python scripts/fetch_once.py --force-backfill
 ```
 
 > ⚠️ 不要反复手动重跑抓取。登录、账单详情、交费页都会触发国网风控；日常交给定时任务即可。
+
+### 加载项日志为空时
+
+正常启动时，加载项日志至少应看到：
+
+```text
+SGCC Electricity 插件进程启动
+当前以 Home Assistant Add-on 形式运行
+读取环境变量 PHONE_NUMBER: 187****5764
+运行配置: DB_TYPE=MYSQL, MQTT=..., JOB_START_TIME=...
+启动完成，进入调度循环；每 30 分钟输出一次心跳日志。
+```
+
+排查顺序：
+
+1. 确认加载项配置里 `LOG_LEVEL=INFO`、`HEARTBEAT_LOG_MINUTES=30`。
+2. 看加载项 **信息** 页/主管日志，确认镜像已构建/拉取成功、容器状态是“已启动”。
+3. 如果日志里只有 `SGCC Electricity 插件进程启动` 后停止，后面通常是配置/依赖异常；把该段日志发出来。
+4. 如果日志完全空白，优先检查 Supervisor 日志和镜像构建结果，而不是 Python 代码。
 
 ---
 

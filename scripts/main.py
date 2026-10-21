@@ -12,46 +12,81 @@ from datetime import datetime,timedelta
 from const import *
 from data_fetcher import DataFetcher
 
+def mask_phone(value):
+    if not value:
+        return "(未配置)"
+    text = str(value)
+    if len(text) >= 7:
+        return f"{text[:3]}****{text[-4:]}"
+    return "***"
+
+
 def main():
     global RETRY_TIMES_LIMIT
+    # 先建立 stdout 日志，确保 options/env 读取阶段的日志也能出现在 HA 加载项日志里
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  [%(levelname)-8s] ---- %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+        force=True,
+    )
+    logging.info("SGCC Electricity 插件进程启动")
     if 'PYTHON_IN_DOCKER' not in os.environ:
         # 读取 .env 文件
         import dotenv
         dotenv.load_dotenv(verbose=True)
     if os.path.isfile('/data/options.json'):
-        with open('/data/options.json') as f:
-            options = json.load(f)
         try:
+            with open('/data/options.json') as f:
+                options = json.load(f)
             for key, value in options.items():
                 os.environ[key] = str(value)
             import const
             const.LLM_API_KEY = os.getenv('LLM_API_KEY', '').strip()
             const.LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3')
             const.LLM_MODEL = os.getenv('LLM_MODEL', 'doubao-seed-2-0-pro-260215')
-            logging.info(f"当前以Homeassistant Add-on 形式运行.")
+            logging.info("当前以 Home Assistant Add-on 形式运行")
         except Exception as e:
-            logging.error(f"读取 options.json 文件失败，程序将退出，错误信息: {e}。")
-            sys.exit()
+            logging.exception("读取 options.json 失败，程序将退出: %s", e)
+            sys.exit(1)
 
     try:
+        LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        logger_init(LOG_LEVEL)
+        logging.info(
+            "当前以 Docker 镜像方式运行。"
+            if "PYTHON_IN_DOCKER" in os.environ
+            else "当前以本地 Python 方式运行。"
+        )
         PHONE_NUMBER = os.getenv("PHONE_NUMBER")
-        logging.info(f"读取环境变量 PHONE_NUMBER : {PHONE_NUMBER}")
+        logging.info(f"读取环境变量 PHONE_NUMBER: {mask_phone(PHONE_NUMBER)}")
         PASSWORD = os.getenv("PASSWORD")
         HASS_URL = os.getenv("HASS_URL")
-        JOB_START_TIME = os.getenv("JOB_START_TIME","07:00" )
-        LOG_LEVEL = os.getenv("LOG_LEVEL","INFO")
+        JOB_START_TIME = os.getenv("JOB_START_TIME", "07:00")
         VERSION = os.getenv("VERSION")
         RETRY_TIMES_LIMIT = int(os.getenv("RETRY_TIMES_LIMIT", 5))
-
-        logger_init(LOG_LEVEL)
-        logging.info(f"当前以Docker镜像方式运行。")
     except Exception as e:
-        logging.error(f"读取 .env 文件失败，程序将退出，错误信息: {e}。")
-        sys.exit()
+        logging.exception("读取配置失败，程序将退出: %s", e)
+        sys.exit(1)
 
     logging.info(f"当前仓库版本为 {VERSION}，仓库地址为 https://github.com/gradual-wu/sgcc_electricity_new.git")
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"当前日期为 {current_datetime}。")
+    logging.info(
+        "运行配置: DB_TYPE=%s, MQTT=%s:%s, JOB_START_TIME=%s, "
+        "DAILY_FETCH_DAYS=%s, DAILY_RECONCILE_DAYS=%s, ENTITY_ID_STYLE=%s, "
+        "FORCE_FULL_REFRESH=%s, FILL_MISSING_DATA=%s",
+        os.getenv("DB_TYPE", "NONE"),
+        os.getenv("MQTT_HOST") or "(从 HASS_URL 推断)",
+        os.getenv("MQTT_PORT", "1883"),
+        JOB_START_TIME,
+        os.getenv("DAILY_FETCH_DAYS", "7"),
+        os.getenv("DAILY_RECONCILE_DAYS", "7"),
+        os.getenv("ENTITY_ID_STYLE", "none"),
+        os.getenv("FORCE_FULL_REFRESH", "false"),
+        os.getenv("FILL_MISSING_DATA", "false"),
+    )
 
     logging.info(f"开始初始化 ErrorWatcher")
     ErrorWatcher.init(root_dir='/data/errors')
@@ -94,14 +129,35 @@ def main():
     else:
         logging.info("已从数据库恢复数据，跳过启动时抓取以保护账号。")
 
+    try:
+        heartbeat_seconds = max(int(os.getenv("HEARTBEAT_LOG_MINUTES", "30")), 1) * 60
+    except ValueError:
+        heartbeat_seconds = 30 * 60
+    last_heartbeat = time.monotonic()
+    logging.info(
+        f"启动完成，进入调度循环；每 {heartbeat_seconds // 60} 分钟输出一次心跳日志。"
+    )
+
     while True:
         try:
             schedule.run_pending()
+            now = time.monotonic()
+            if now - last_heartbeat >= heartbeat_seconds:
+                last_heartbeat = now
+                logging.info(
+                    "心跳: 插件运行中，当前时间 %s，下次抓取 %s / %s。",
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    parsed_time.strftime("%H:%M"),
+                    next_run_time.strftime("%H:%M"),
+                )
             time.sleep(1)
         except KeyboardInterrupt:
             logging.info("收到退出信号，正在关闭 MQTT 连接...")
             updator.close()
             break
+        except Exception as exc:
+            logging.exception("调度循环异常，10 秒后继续: %s", exc)
+            time.sleep(10)
 
 
 def republish_or_fetch(updator: SensorUpdator, fetcher: DataFetcher):
@@ -122,13 +178,18 @@ def run_task(data_fetcher: DataFetcher, updator: SensorUpdator):
             continue
 
 def logger_init(level: str):
+    level = str(level or "INFO").upper()
+    if level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        level = "INFO"
     logger = logging.getLogger()
     logger.setLevel(level)
+    logger.handlers.clear()
     logging.getLogger("urllib3").setLevel(logging.CRITICAL)
     format = logging.Formatter("%(asctime)s  [%(levelname)-8s] ---- %(message)s", "%Y-%m-%d %H:%M:%S")
     sh = logging.StreamHandler(stream=sys.stdout)
     sh.setFormatter(format)
     logger.addHandler(sh)
+    logger.propagate = False
 
 
 if __name__ == "__main__":

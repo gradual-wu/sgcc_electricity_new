@@ -71,6 +71,12 @@ configuration:
   JOB_START_TIME:
     name: Daily fetch time
     description: Daily fetch time; another run happens 12 hours later.
+  LOG_LEVEL:
+    name: Log level
+    description: DEBUG, INFO, WARNING or ERROR.
+  HEARTBEAT_LOG_MINUTES:
+    name: Heartbeat interval
+    description: Minutes between heartbeat log lines that confirm the add-on is running.
   RETRY_WAIT_TIME_OFFSET_UNIT:
     name: Login and page wait
     description: Seconds to wait after login and page actions.

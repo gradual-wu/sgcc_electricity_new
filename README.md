@@ -259,6 +259,8 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 | `LLM_BASE_URL` | 大模型接口地址（火山引擎留空使用默认值） |
 | `LLM_MODEL` | 模型名称，如 `ep-2025xxxxxx-xxxxx`（火山引擎接入点 ID） |
 | `JOB_START_TIME` | 每日执行时间，默认 `07:00`，每 12 小时执行一次 |
+| `LOG_LEVEL` | 日志级别：`DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
+| `HEARTBEAT_LOG_MINUTES` | 心跳日志间隔（分钟），用于确认插件仍在运行，默认 `30` |
 | `IGNORE_USER_ID` | 需要忽略的户号，多个用英文逗号分隔 |
 | `BALANCE` | 余额低于此值时触发通知（元） |
 

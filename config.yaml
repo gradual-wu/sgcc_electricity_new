@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.15.1"
+version: "v1.15.2"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -76,6 +76,10 @@ options:
   # ── 调度与数据窗口 ────────────────────────────────────────
   # 每日抓取时间（另加 12 小时后一次）
   JOB_START_TIME: "07:00"
+  # 日志级别：DEBUG / INFO / WARNING / ERROR
+  LOG_LEVEL: "INFO"
+  # 心跳日志间隔（分钟），用于确认插件仍在运行
+  HEARTBEAT_LOG_MINUTES: 30
   # 登录/页面操作的等待秒数
   RETRY_WAIT_TIME_OFFSET_UNIT: 15
   # 账单/交费/阶梯等数据页的等待秒数
@@ -171,6 +175,8 @@ schema:
   CLEANUP_LEGACY_ENTITY_IDS: bool?
   CLEANUP_LEGACY_REST_STATES: bool?
   JOB_START_TIME: str
+  LOG_LEVEL: "list(DEBUG|INFO|WARNING|ERROR)?"
+  HEARTBEAT_LOG_MINUTES: int(1,1440)?
   RETRY_WAIT_TIME_OFFSET_UNIT: int(2,30)
   PAGE_WAIT_TIME: int(2,60)?
   DATA_RETENTION_DAYS: int
