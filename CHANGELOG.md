@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.15.1] - 2026-10-21
+
+### Documentation
+
+- 为 `config.yaml`、`example.env` 的每个配置项补充中文注释。
+- 新增 HA 加载项 `translations/en.yaml`、`translations/zh-Hans.yaml`，配置界面逐项显示名称和说明。
+- README / FLOW 补充配置参考入口。
+
 ## [v1.15.0] - 2026-10-21
 
 ### Added

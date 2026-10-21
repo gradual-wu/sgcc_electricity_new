@@ -1,0 +1,166 @@
+configuration:
+  PHONE_NUMBER:
+    name: State Grid phone number
+    description: Phone number used to log in to 95598.
+  PASSWORD:
+    name: State Grid password
+    description: Password used to log in to 95598.
+  IGNORE_USER_ID:
+    name: Ignored account IDs
+    description: Comma-separated account IDs that should not be fetched or published.
+  USER_NAMES:
+    name: Account names
+    description: "Friendly names in the form account_id:name, separated by commas."
+  DB_TYPE:
+    name: Database type
+    description: NONE, SQLITE or MYSQL. MYSQL is recommended for long-term storage.
+  DB_NAME:
+    name: SQLite database file
+    description: SQLite file name when DB_TYPE is SQLITE.
+  MYSQL_HOST:
+    name: MySQL host
+    description: MySQL server address.
+  MYSQL_USER:
+    name: MySQL user
+    description: MySQL user name.
+  MYSQL_PASSWORD:
+    name: MySQL password
+    description: MySQL password.
+  MYSQL_DATABASE:
+    name: MySQL database
+    description: MySQL database name.
+  MYSQL_PORT:
+    name: MySQL port
+    description: MySQL port, default 3306.
+  HASS_URL:
+    name: Home Assistant URL
+    description: URL of your Home Assistant instance.
+  HASS_TOKEN:
+    name: Home Assistant token
+    description: Long-lived token used for persistent notifications and legacy entity cleanup.
+  HASS_WWW_DIR:
+    name: HA www directory
+    description: Directory for QR images, served by Home Assistant under /local/.
+  MQTT_HOST:
+    name: MQTT host
+    description: MQTT broker address. If empty, it is derived from HASS_URL.
+  MQTT_PORT:
+    name: MQTT port
+    description: MQTT broker port, default 1883.
+  MQTT_USERNAME:
+    name: MQTT username
+    description: MQTT broker username.
+  MQTT_PASSWORD:
+    name: MQTT password
+    description: MQTT broker password.
+  MQTT_DISCOVERY_PREFIX:
+    name: MQTT discovery prefix
+    description: Home Assistant MQTT Discovery prefix, default homeassistant.
+  MQTT_STATE_PREFIX:
+    name: MQTT state prefix
+    description: Prefix for state topics, default sgcc_electricity.
+  ENTITY_ID_STYLE:
+    name: Entity ID style
+    description: "none: no suffix; full: full account ID; last4: last 4 digits."
+  CLEANUP_LEGACY_ENTITY_IDS:
+    name: Clean legacy entity IDs
+    description: Remove legacy last-4 MQTT Discovery configs when switching entity ID styles.
+  CLEANUP_LEGACY_REST_STATES:
+    name: Clean legacy REST states
+    description: Remove same-name states created by the old REST integration on startup.
+  JOB_START_TIME:
+    name: Daily fetch time
+    description: Daily fetch time; another run happens 12 hours later.
+  RETRY_WAIT_TIME_OFFSET_UNIT:
+    name: Login and page wait
+    description: Seconds to wait after login and page actions.
+  PAGE_WAIT_TIME:
+    name: Data page wait
+    description: Seconds to wait on bill, payment and tier pages.
+  DATA_RETENTION_DAYS:
+    name: Data retention days
+    description: Days to keep daily usage and balance history; 0 keeps data forever.
+  DAILY_FETCH_DAYS:
+    name: Daily fetch window
+    description: Number of days fetched from the page, 7 or 30.
+  DAILY_RECONCILE_DAYS:
+    name: Daily reconcile days
+    description: Only reconcile the most recent N days when writing to the database.
+  PAYMENT_FETCH_ENABLED:
+    name: Fetch payment records
+    description: Whether to fetch payment records.
+  PAYMENT_FETCH_START:
+    name: Payment start date
+    description: Start date for payment history; empty means January 1 of last year.
+  PAYMENT_FETCH_LIMIT:
+    name: Payment query limit
+    description: Maximum number of payment records per query.
+  PAYMENT_FETCH_INTERVAL_DAYS:
+    name: Payment sync interval
+    description: Sync payment records every N days; always syncs on the 1st.
+  BILL_SYNC_ENABLED:
+    name: Sync official bills
+    description: Whether to fetch official monthly bills.
+  BILL_SYNC_MAX_MONTHS:
+    name: Bill sync limit
+    description: Maximum number of months to backfill per run.
+  TIER_SYNC_ENABLED:
+    name: Sync official tier
+    description: Whether to read the official tier usage page.
+  TIER1_MAX:
+    name: Tier 1 maximum
+    description: First tier upper bound in kWh, default 2160.
+  TIER2_MAX:
+    name: Tier 2 maximum
+    description: Second tier upper bound in kWh, default 4200.
+  YEAR_BACKFILL_ENABLED:
+    name: Auto year backfill
+    description: Allow automatic full-year backfill when daily coverage is below about 80%.
+  YEAR_BACKFILL_START:
+    name: Year backfill start
+    description: Start date for yearly backfill; empty means January 1 of the current year.
+  YEAR_BACKFILL_CHUNK_DAYS:
+    name: Backfill chunk days
+    description: Days per backfill request. Smaller values are safer.
+  FORCE_YEAR_BACKFILL:
+    name: Force year backfill
+    description: Re-fetch the current year's daily data.
+  FORCE_FULL_REFRESH:
+    name: Force full refresh
+    description: Re-fetch daily data, official bills, payments and tier snapshot on startup. Set back to false when done.
+  FILL_MISSING_DATA:
+    name: Fill missing data
+    description: Scan the database and fetch only missing daily ranges, bills, payments and tier snapshot on startup. Set back to false when done.
+  PUSH_TYPE:
+    name: Balance notification
+    description: None, PUSHPLUS or URLPUSH.
+  BALANCE:
+    name: Balance threshold
+    description: Notify when balance is below this amount in CNY.
+  PUSHPLUS_TOKEN:
+    name: PushPlus token
+    description: PushPlus tokens separated by commas.
+  PUSH_URL:
+    name: URL push endpoint
+    description: "Receives JSON: {user_id, balance}."
+  PUSH_QRCODE_URL:
+    name: QR push endpoint
+    description: Optional custom endpoint for login QR codes.
+  LOGIN_FALLBACK:
+    name: Login fallback
+    description: qrcode or None.
+  QR_CODE_LOGIN_WAIT_COUNT:
+    name: QR wait count
+    description: Number of QR login checks.
+  QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT:
+    name: QR wait interval
+    description: Seconds between QR login checks.
+  LLM_API_KEY:
+    name: LLM API key
+    description: API key used for captcha recognition.
+  LLM_BASE_URL:
+    name: LLM base URL
+    description: OpenAI-compatible API base URL.
+  LLM_MODEL:
+    name: LLM model
+    description: Model name or endpoint ID.

@@ -225,6 +225,9 @@ HA 的「设置 → 人员 → 用户」中新建一个普通用户（例如 `sg
 
 在加载项的「配置」页面填写以下参数：
 
+> 每个配置项的完整说明会直接显示在加载项配置界面（`translations/en.yaml`、`translations/zh-Hans.yaml`）；
+> 本地运行请参考逐项注释的 `example.env`。
+
 | 参数 | 说明 |
 |------|------|
 | `PHONE_NUMBER` | 国网登录手机号 |

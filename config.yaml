@@ -1,5 +1,5 @@
 name: "SGCC Electricity"
-version: "v1.15.0"
+version: "v1.15.1"
 slug: "sgcc_electricity"
 description: "获取国网电费数据的插件"
 url: "https://github.com/gradual-wu/sgcc_electricity_new"
@@ -19,61 +19,132 @@ map:
   - type: data
     read_only: False
 options:
+  # ── 国网登录 ──────────────────────────────────────────────
+  # 国网登录手机号
   PHONE_NUMBER: ""
+  # 国网登录密码
   PASSWORD: ""
+  # 不抓取的户号，多个用英文逗号分隔
   IGNORE_USER_ID: "xxxx,xxxx"
+  # 户号友好名称，格式：户号:名称，多个用英文逗号分隔
   USER_NAMES: ""
+
+  # ── 数据库 ────────────────────────────────────────────────
+  # 数据库类型：NONE / SQLITE / MYSQL；长期存储推荐 MYSQL
   DB_TYPE: "NONE"
+  # SQLite 数据库文件名（DB_TYPE=SQLITE 时使用）
   DB_NAME: "homeassistant.db"
+  # MySQL 地址
   MYSQL_HOST: ""
+  # MySQL 用户名
   MYSQL_USER: ""
+  # MySQL 密码
   MYSQL_PASSWORD: ""
+  # MySQL 数据库名
   MYSQL_DATABASE: "sgcc"
+  # MySQL 端口
   MYSQL_PORT: 3306
+
+  # ── Home Assistant ────────────────────────────────────────
+  # Home Assistant 地址
   HASS_URL: "http://homeassistant.local:8123/"
+  # HA 长期访问令牌，用于持久通知和旧实体清理
   HASS_TOKEN: ""
+  # 二维码图片保存目录，HA 通过 /local/ 访问
   HASS_WWW_DIR: "/config/www"
+
+  # ── MQTT / HA 实体 ────────────────────────────────────────
+  # MQTT broker 地址；留空时从 HASS_URL 推断
   MQTT_HOST: "127.0.0.1"
+  # MQTT broker 端口
   MQTT_PORT: 1883
+  # MQTT 用户名
   MQTT_USERNAME: ""
+  # MQTT 密码
   MQTT_PASSWORD: ""
+  # HA MQTT Discovery 前缀
   MQTT_DISCOVERY_PREFIX: "homeassistant"
+  # 状态 topic 前缀
   MQTT_STATE_PREFIX: "sgcc_electricity"
+  # 实体 ID 风格：none=无后缀；full=完整户号；last4=后4位
   ENTITY_ID_STYLE: "none"
+  # 切换实体 ID 风格时删除旧的后4位 MQTT 配置
   CLEANUP_LEGACY_ENTITY_IDS: true
+  # 启动时删除旧版 REST 创建的同名实体状态
   CLEANUP_LEGACY_REST_STATES: true
+
+  # ── 调度与数据窗口 ────────────────────────────────────────
+  # 每日抓取时间（另加 12 小时后一次）
   JOB_START_TIME: "07:00"
+  # 登录/页面操作的等待秒数
   RETRY_WAIT_TIME_OFFSET_UNIT: 15
+  # 账单/交费/阶梯等数据页的等待秒数
   PAGE_WAIT_TIME: 10
+  # 日数据和余额历史保留天数；0=永久保留
   DATA_RETENTION_DAYS: 0
+  # 页面日数据抓取窗口：7 或 30 天
   DAILY_FETCH_DAYS: 7
+  # 日常写库只核对最近多少天
   DAILY_RECONCILE_DAYS: 7
-  # 交费记录 / 官方账单 / 阶梯 / 全年回补
+
+  # ── 交费 / 官方账单 / 阶梯 ────────────────────────────────
+  # 是否抓取交费记录
   PAYMENT_FETCH_ENABLED: true
+  # 交费记录查询起始日期；留空默认去年 1 月 1 日
   PAYMENT_FETCH_START: ""
+  # 单次最多查询交费记录条数
   PAYMENT_FETCH_LIMIT: 200
+  # 交费记录同步间隔天数；每月 1 号总会同步
   PAYMENT_FETCH_INTERVAL_DAYS: 7
+  # 是否同步官方月度账单
   BILL_SYNC_ENABLED: true
+  # 单次最多补查月份数
   BILL_SYNC_MAX_MONTHS: 12
+  # 是否读取官方阶梯快照
   TIER_SYNC_ENABLED: true
+  # 第一阶梯上限（kWh）
   TIER1_MAX: 2160
+  # 第二阶梯上限（kWh）
   TIER2_MAX: 4200
+
+  # ── 回补 / 刷新 ───────────────────────────────────────────
+  # 是否允许日常按覆盖率自动做全年回补
   YEAR_BACKFILL_ENABLED: true
+  # 全年回补起始日期；留空默认当年 1 月 1 日
   YEAR_BACKFILL_START: ""
+  # 全年回补分段天数（分段过大会漏天数）
   YEAR_BACKFILL_CHUNK_DAYS: 30
+  # 强制重新回补当年日数据
   FORCE_YEAR_BACKFILL: false
+  # 强制全量刷新：日数据+官方账单+交费+阶梯；启动时执行，跑完改回 false
   FORCE_FULL_REFRESH: false
+  # 只补缺失：扫描数据库，只抓缺失的数据；启动时执行，跑完改回 false
   FILL_MISSING_DATA: false
+
+  # ── 通知 / 登录备用 ───────────────────────────────────────
+  # 余额不足通知方式：None / PUSHPLUS / URLPUSH
   PUSH_TYPE: "None"
+  # 余额提醒阈值（元）
   BALANCE: 5.0
+  # PushPlus token，多个用英文逗号分隔
   PUSHPLUS_TOKEN: "xxxx,xxxx"
+  # URL 推送地址
   PUSH_URL: ""
+  # 二维码自定义推送地址
   PUSH_QRCODE_URL: ""
+  # 密码登录失败后的备用方式：qrcode 或 None
   LOGIN_FALLBACK: "qrcode"
+  # 二维码登录等待次数
   QR_CODE_LOGIN_WAIT_COUNT: 18
+  # 二维码登录等待间隔（秒）
   QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT: 10
+
+  # ── 大模型验证码识别 ──────────────────────────────────────
+  # 大模型 API Key
   LLM_API_KEY: ""
+  # 大模型 OpenAI 兼容接口地址
   LLM_BASE_URL: ""
+  # 大模型名称/接入点 ID
   LLM_MODEL: ""
 schema:
   PHONE_NUMBER: str

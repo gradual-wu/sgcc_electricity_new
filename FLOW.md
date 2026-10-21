@@ -559,6 +559,8 @@ db.ensure_connected(user_id)
 | `FORCE_YEAR_BACKFILL` | `false` | 强制重新回补当年日数据 |
 | `FORCE_FULL_REFRESH` | `false` | 强制全量刷新日数据 + 官方账单 + 交费 + 阶梯；跑完改回 `false` |
 | `FILL_MISSING_DATA` | `false` | 只补缺失：扫描数据库缺口，只抓缺失数据；跑完改回 `false` |
+
+> 完整逐项说明见 `example.env` 注释，以及加载项配置界面的 `translations/en.yaml` / `translations/zh-Hans.yaml`。
 | `TIER1_MAX` / `TIER2_MAX` | `2160` / `4200` | 阶梯边界 |
 | `PAGE_WAIT_TIME` | `10` | 数据页操作等待秒数 |
 | `HASS_WWW_DIR` | `/config/www` | 二维码图片保存目录，HA 通过 `/local/` 访问 |

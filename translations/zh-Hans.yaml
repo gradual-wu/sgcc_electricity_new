@@ -1,0 +1,166 @@
+configuration:
+  PHONE_NUMBER:
+    name: 国网手机号
+    description: 用于登录 95598 的手机号。
+  PASSWORD:
+    name: 国网密码
+    description: 用于登录 95598 的密码。
+  IGNORE_USER_ID:
+    name: 忽略的户号
+    description: 不抓取、不写库、不推送 HA 的户号，多个用英文逗号分隔。
+  USER_NAMES:
+    name: 户号友好名称
+    description: "格式为 户号:名称，多个用英文逗号分隔。"
+  DB_TYPE:
+    name: 数据库类型
+    description: NONE / SQLITE / MYSQL；长期存储推荐 MYSQL。
+  DB_NAME:
+    name: SQLite 数据库文件
+    description: DB_TYPE=SQLITE 时使用的数据库文件名。
+  MYSQL_HOST:
+    name: MySQL 地址
+    description: MySQL 服务器地址。
+  MYSQL_USER:
+    name: MySQL 用户名
+    description: MySQL 用户名。
+  MYSQL_PASSWORD:
+    name: MySQL 密码
+    description: MySQL 密码。
+  MYSQL_DATABASE:
+    name: MySQL 数据库名
+    description: MySQL 数据库名。
+  MYSQL_PORT:
+    name: MySQL 端口
+    description: MySQL 端口，默认 3306。
+  HASS_URL:
+    name: Home Assistant 地址
+    description: 你的 Home Assistant 地址。
+  HASS_TOKEN:
+    name: Home Assistant 令牌
+    description: HA 长期访问令牌，用于持久通知和旧实体清理。
+  HASS_WWW_DIR:
+    name: HA www 目录
+    description: 二维码图片保存目录，HA 通过 /local/ 访问。
+  MQTT_HOST:
+    name: MQTT 地址
+    description: MQTT broker 地址；留空时从 HASS_URL 推断。
+  MQTT_PORT:
+    name: MQTT 端口
+    description: MQTT broker 端口，默认 1883。
+  MQTT_USERNAME:
+    name: MQTT 用户名
+    description: MQTT broker 用户名。
+  MQTT_PASSWORD:
+    name: MQTT 密码
+    description: MQTT broker 密码。
+  MQTT_DISCOVERY_PREFIX:
+    name: MQTT Discovery 前缀
+    description: HA MQTT Discovery 前缀，默认 homeassistant。
+  MQTT_STATE_PREFIX:
+    name: MQTT 状态前缀
+    description: 状态 topic 前缀，默认 sgcc_electricity。
+  ENTITY_ID_STYLE:
+    name: 实体 ID 风格
+    description: "none=无后缀；full=完整户号；last4=后4位。"
+  CLEANUP_LEGACY_ENTITY_IDS:
+    name: 清理旧实体 ID
+    description: 切换实体 ID 风格时删除旧的后4位 MQTT Discovery 配置。
+  CLEANUP_LEGACY_REST_STATES:
+    name: 清理旧 REST 状态
+    description: 启动时删除旧版 REST 创建的同名实体状态。
+  JOB_START_TIME:
+    name: 每日抓取时间
+    description: 每日抓取时间，另加 12 小时后执行一次。
+  RETRY_WAIT_TIME_OFFSET_UNIT:
+    name: 登录/页面等待
+    description: 登录和页面操作后的等待秒数。
+  PAGE_WAIT_TIME:
+    name: 数据页等待
+    description: 账单、交费、阶梯等数据页的等待秒数。
+  DATA_RETENTION_DAYS:
+    name: 数据保留天数
+    description: 日数据和余额历史保留天数；0 表示永久保留。
+  DAILY_FETCH_DAYS:
+    name: 日数据抓取窗口
+    description: 页面日数据抓取天数，7 或 30。
+  DAILY_RECONCILE_DAYS:
+    name: 日常核对天数
+    description: 日常写库只核对最近 N 天。
+  PAYMENT_FETCH_ENABLED:
+    name: 抓取交费记录
+    description: 是否抓取交费记录。
+  PAYMENT_FETCH_START:
+    name: 交费记录起始日期
+    description: 交费记录查询起始日期；留空默认去年 1 月 1 日。
+  PAYMENT_FETCH_LIMIT:
+    name: 交费记录条数
+    description: 单次最多查询交费记录条数。
+  PAYMENT_FETCH_INTERVAL_DAYS:
+    name: 交费同步间隔
+    description: 每 N 天同步一次交费记录；每月 1 号总会同步。
+  BILL_SYNC_ENABLED:
+    name: 同步官方账单
+    description: 是否抓取官方月度账单。
+  BILL_SYNC_MAX_MONTHS:
+    name: 账单补查上限
+    description: 单次最多补查月份数。
+  TIER_SYNC_ENABLED:
+    name: 同步官方阶梯
+    description: 是否读取官方阶梯用电页面。
+  TIER1_MAX:
+    name: 第一阶梯上限
+    description: 第一阶梯上限（kWh），默认 2160。
+  TIER2_MAX:
+    name: 第二阶梯上限
+    description: 第二阶梯上限（kWh），默认 4200。
+  YEAR_BACKFILL_ENABLED:
+    name: 自动全年回补
+    description: 当年日数据覆盖不足约 80% 时，是否自动回补全年日数据。
+  YEAR_BACKFILL_START:
+    name: 全年回补起始日期
+    description: 全年回补起始日期；留空默认当年 1 月 1 日。
+  YEAR_BACKFILL_CHUNK_DAYS:
+    name: 回补分段天数
+    description: 每次回补请求覆盖的天数，越小越稳。
+  FORCE_YEAR_BACKFILL:
+    name: 强制全年回补
+    description: 强制重新回补当年日数据。
+  FORCE_FULL_REFRESH:
+    name: 强制全量刷新
+    description: 启动时重新抓取日数据、官方账单、交费和阶梯快照；完成后请改回 false。
+  FILL_MISSING_DATA:
+    name: 只补缺失数据
+    description: 启动时扫描数据库，只抓缺失的日数据/账单/交费/阶梯；完成后请改回 false。
+  PUSH_TYPE:
+    name: 余额通知方式
+    description: None / PUSHPLUS / URLPUSH。
+  BALANCE:
+    name: 余额提醒阈值
+    description: 余额低于此金额时通知（元）。
+  PUSHPLUS_TOKEN:
+    name: PushPlus token
+    description: PushPlus token，多个用英文逗号分隔。
+  PUSH_URL:
+    name: URL 推送地址
+    description: "接收 JSON：{user_id, balance}。"
+  PUSH_QRCODE_URL:
+    name: 二维码推送地址
+    description: 可选的二维码自定义推送地址。
+  LOGIN_FALLBACK:
+    name: 登录备用方式
+    description: qrcode 或 None。
+  QR_CODE_LOGIN_WAIT_COUNT:
+    name: 二维码等待次数
+    description: 二维码登录检查次数。
+  QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT:
+    name: 二维码等待间隔
+    description: 每次二维码登录检查的间隔秒数。
+  LLM_API_KEY:
+    name: 大模型 API Key
+    description: 用于验证码识别的大模型 API Key。
+  LLM_BASE_URL:
+    name: 大模型接口地址
+    description: OpenAI 兼容接口地址。
+  LLM_MODEL:
+    name: 大模型名称
+    description: 模型名称或接入点 ID。
