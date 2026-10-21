@@ -305,3 +305,25 @@ def test_sqlite_daily_dates_reports_present_dates(tmp_path, monkeypatch):
         }
     finally:
         db.close_connect()
+
+
+def test_sqlite_daily_sync_preserves_page_month_totals(tmp_path, monkeypatch):
+    db = _make_db(tmp_path, monkeypatch)
+    try:
+        db.insert_monthly_data({
+            "month": "2026-09",
+            "total_usage": 131.0,
+            "total_charge": 78.6,
+            "source": "calculated",
+        })
+        db.insert_daily_data({"date": "2026-09-01", "total_usage": 10.0, "valley_usage": 4.0})
+        db.insert_daily_data({"date": "2026-09-02", "total_usage": 20.0, "flat_usage": 8.0})
+        assert db.sync_calculated_month_from_daily("2026-09") is True
+        row = db.get_monthly_usage_row("2026-09")
+        assert row["total_usage"] == 131.0
+        assert row["total_charge"] == 78.6
+        assert row["valley_usage"] == 4.0
+        assert row["flat_usage"] == 8.0
+        assert row["source"] == "calculated"
+    finally:
+        db.close_connect()

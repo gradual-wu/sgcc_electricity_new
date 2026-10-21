@@ -333,7 +333,11 @@ class DB:
     # derived helpers (shared by MySQL and SQLite)
     # ------------------------------------------------------------------
     def sync_calculated_month_from_daily(self, month: str) -> bool:
-        """用日数据汇总一个月的电量/电费；官方账单已存在时不覆盖。"""
+        """用日数据汇总一个月的电量/电费；官方账单已存在时不覆盖。
+
+        如果该月已有页面月度值（calculated/legacy），保留页面电量和电费，
+        只用日数据补充分时字段。否则用日数据创建一条 calculated 月度行。
+        """
         month_key = normalize_month(month)
         if not month_key:
             return False
@@ -349,18 +353,24 @@ class DB:
         summary = self.get_daily_summary(start, end)
         if not summary or not summary.get("count"):
             return False
-        return self.insert_monthly_data(
-            {
-                "month": month_key,
-                "total_usage": summary.get("total_usage"),
-                "total_charge": summary.get("total_charge"),
-                "valley_usage": summary.get("valley_usage"),
-                "flat_usage": summary.get("flat_usage"),
-                "peak_usage": summary.get("peak_usage"),
-                "tip_usage": summary.get("tip_usage"),
-                "source": self.MONTHLY_SOURCE_CALCULATED,
-            }
-        )
+
+        existing = self.get_monthly_usage_row(month_key)
+        payload = {
+            "month": month_key,
+            "valley_usage": summary.get("valley_usage"),
+            "flat_usage": summary.get("flat_usage"),
+            "peak_usage": summary.get("peak_usage"),
+            "tip_usage": summary.get("tip_usage"),
+            "source": self.MONTHLY_SOURCE_CALCULATED,
+        }
+        if existing and existing.get("total_usage") is not None:
+            # 页面月度电量/电费更接近官方口径，保留；只补分时。
+            payload["total_usage"] = None
+            payload["total_charge"] = None
+        else:
+            payload["total_usage"] = summary.get("total_usage")
+            payload["total_charge"] = summary.get("total_charge")
+        return self.insert_monthly_data(payload)
 
     def refresh_yearly_from_monthly(self, year: str) -> bool:
         year_key = normalize_year(year)
