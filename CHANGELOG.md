@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.15.7] - 2026-10-23
+
+### Fixed
+
+- 修复 HA arm64 容器中实际 Chromium 155 却向登录页报告 Windows Chrome 136 的浏览器信息冲突；默认语言调整为简体中文。
+- RK001 出现时遵守 `LOGIN_FALLBACK` 配置；服务端仍可能要求扫码，需以实际登录结果验证。
+- amd64 与 arm64 镜像都升级到 Chrome for Testing 156.0.8078.47 和配套 ChromeDriver；移除 amd64 固定 Chrome 120 的分支。
+
 ## [v1.15.6] - 2026-10-21
 
 ### Added

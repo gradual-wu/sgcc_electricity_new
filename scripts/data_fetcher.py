@@ -112,7 +112,7 @@ class DataFetcher:
         chrome_options.add_experimental_option("useAutomationExtension", False)
 
         # 可选：环境变量自定义反检测参数
-        browser_lang = os.getenv("BROWSER_LANGUAGE", "zh-HK,zh,en-US,en")
+        browser_lang = os.getenv("BROWSER_LANGUAGE", "zh-CN,zh,en-US,en")
         browser_ua = os.getenv("BROWSER_USER_AGENT", "")
         device_scale = os.getenv("BROWSER_DEVICE_SCALE_FACTOR", "2")
         window_size = os.getenv("BROWSER_WINDOW_SIZE", "1158,848")
@@ -171,71 +171,24 @@ class DataFetcher:
 
         _setting_driver(driver)
 
-        # ── 反指纹检测：伪装为真实 Windows Chrome，绕过腾讯风控 ──
-        # 修复 Issue #267：容器环境被识别为高风险导致 RK001
-        real_ua = (browser_ua or
-                   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/136.0.0.0 Safari/537.36")
-        try:
-            driver.execute_cdp_cmd("Network.setUserAgentOverride", {
-                "userAgent": real_ua,
-                "acceptLanguage": browser_lang,
-                "platform": "Win32",
-            })
-        except Exception as e:
-            logging.warning(f"CDP 设置 UA 失败: {e}")
+        # 保持浏览器报告的版本、平台和语言与实际环境一致。
+        # 旧实现固定报告 Windows Chrome 136，在 arm64 上与 Chromium 155 明显冲突。
+        if not browser_ua and 'PYTHON_IN_DOCKER' in os.environ:
+            try:
+                actual_ua = driver.execute_script("return navigator.userAgent")
+                if "HeadlessChrome/" in actual_ua:
+                    driver.execute_cdp_cmd("Network.setUserAgentOverride", {
+                        "userAgent": actual_ua.replace("HeadlessChrome/", "Chrome/"),
+                        "acceptLanguage": browser_lang,
+                    })
+            except Exception as e:
+                logging.warning(f"CDP 设置浏览器 UA 失败: {e}")
 
         try:
             driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
                 "source": """
                     // 隐藏 webdriver 标识
                     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    // 伪装为 Windows 平台
-                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-                    // 伪装语言
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['zh-CN', 'zh', 'en-US', 'en']
-                    });
-                    // 模拟正常浏览器插件数量
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
-                    // 补充 chrome 对象（无头模式下可能缺失）
-                    window.chrome = window.chrome || {};
-                    window.chrome.runtime = window.chrome.runtime || {};
-                    // 伪装 userAgentData 为 Windows Chrome（腾讯风控检测此字段）
-                    try {
-                        Object.defineProperty(navigator, 'userAgentData', {
-                            get: () => ({
-                                brands: [
-                                    {brand: 'Chromium', version: '136'},
-                                    {brand: 'Google Chrome', version: '136'},
-                                    {brand: 'Not-A.Brand', version: '99'}
-                                ],
-                                mobile: false,
-                                platform: 'Windows',
-                                getHighEntropyValues: (hints) => Promise.resolve({
-                                    platform: 'Windows',
-                                    platformVersion: '10.0.0',
-                                    architecture: 'x86',
-                                    bitness: '64',
-                                    model: '',
-                                    uaFullVersion: '136.0.7103.116',
-                                    fullVersionList: [
-                                        {brand: 'Chromium', version: '136.0.7103.116'},
-                                        {brand: 'Google Chrome', version: '136.0.7103.116'},
-                                        {brand: 'Not-A.Brand', version: '99.0.0.0'}
-                                    ]
-                                })
-                            })
-                        });
-                    } catch(e) {}
-                    // 隐藏无头模式特征
-                    const originalQuery = window.navigator.permissions.query;
-                    window.navigator.permissions.query = (parameters) => (
-                        parameters.name === 'notifications'
-                            ? Promise.resolve({state: Notification.permission})
-                            : originalQuery(parameters)
-                    );
                 """
             })
         except Exception as e:
@@ -365,10 +318,10 @@ class DataFetcher:
                     logging.error("点击验证码识别在所有重试后均失败。")
             else:
                 logging.error(f"登录失败: [{error}]\r")
-                # RK001 = 腾讯风控拦截，继续用密码重试无意义，直接走二维码
-                if error and ("RK001" in error or "网络连接超时" in error):
-                    logging.warning("检测到风控拦截（RK001），跳过密码重试，直接切换二维码登录...")
-                    return self._qr_login(driver, error)
+                # 页面返回 RK001 时验证码尚未出现；按配置选择备用登录方式。
+                if error and "RK001" in error:
+                    logging.warning("登录页面返回 RK001，验证码未出现；按 LOGIN_FALLBACK 配置处理。")
+                    return self._fallback_login(driver, error)
         return self._fallback_login(driver, error)
 
     def _get_error_message(self, driver, path) -> Optional[str]:

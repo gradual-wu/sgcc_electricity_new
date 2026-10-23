@@ -176,7 +176,7 @@ sequenceDiagram
 | 场景 | 处理 |
 |---|---|
 | 登录失败 | 记录日志并返回；不无限重试，等待下一次定时任务 |
-| 验证码/风控 | 按配置回退二维码；二维码通过 HA 通知或本地图片输出 |
+| 验证码/风控 | RK001 出现在验证码之前时按 `LOGIN_FALLBACK` 配置回退；二维码通过 HA 通知或本地图片输出。两种架构都使用同版 Chrome for Testing/ChromeDriver，浏览器不再伪造与实际版本冲突的 Windows Chrome 136 身份 |
 | 页面加载慢/元素失效 | 数据页使用统一的 `PAGE_WAIT_TIME`；账单列表每次重新读取行元素 |
 | 户号切换错误 | 优先按完整户号文本切换；切换后用 Vue state 校验；不一致则跳过 |
 | MySQL 空闲断开 | 写库前 `ensure_connected()`，MySQL 用 `ping(reconnect=True)` |

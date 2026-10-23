@@ -19,8 +19,8 @@
 
 | 问题 | 修复 |
 |------|------|
-| Chrome 150 在 HA OS 容器中崩溃（`session not created`） | 固定使用 Chrome for Testing **120.0.6099.109**（仅 amd64），彻底解决崩溃 |
-| 腾讯风控 RK001 登录被拦截 | CDP 注入反指纹脚本，伪装为 Windows Chrome 136，绕过容器指纹检测 |
+| 旧版 Chrome 在 HA OS 容器中崩溃（`session not created`） | 两种架构统一使用 Chrome for Testing 156.0.8078.47 与匹配的 ChromeDriver；升级后需在 HA OS 验证稳定性 |
+| 腾讯风控 RK001 登录被拦截 | 保持浏览器版本、平台、语言信息一致；仍可能因服务端风控要求扫码 |
 | 验证码控件检测到隐藏的预加载 DOM 元素 | 改用 `visibility_of_element_located` 替代 `presence_of_element_located` |
 | 风控触发时自动切换二维码登录 | 检测到 RK001 → 自动切换二维码模式，通过 HA 持久通知展示二维码 |
 | 二维码无法送达（PushPlus 需要实名认证） | 改用 HA 自带的通知系统：图片保存至 `/config/www/`，HA 界面直接显示 |
@@ -98,8 +98,7 @@
 **适用范围**：除南方电网覆盖省份（广东、广西、云南、贵州、海南）外的用户。
 
 **支持架构**：
-- `linux/amd64`：x86-64，使用 Chrome for Testing 120（已修复崩溃问题）
-- `linux/arm64`：树莓派 3+、N1 盒子等，使用系统 Chromium
+- `linux/amd64` 与 `linux/arm64`：都使用 Chrome for Testing 156.0.8078.47 与对应 ChromeDriver
 
 ---
 
@@ -300,8 +299,8 @@ Home Assistant 用户认证（不是加载项 `logins` 里的账号也可以）�
 保存配置后，启动加载项，查看日志确认运行正常。正常运行的日志类似：
 
 ```
-Google Chrome for Testing 120.0.6099.109
-ChromeDriver 120.0.6099.109
+Google Chrome for Testing 156.0.8078.47
+ChromeDriver 156.0.8078.47
 浏览器驱动已初始化。
 打开登录页面: https://95598.cn/osgweb/login
 通过点击验证码登录成功。
@@ -451,8 +450,8 @@ cards:
 - **2026-10-21**：接入方式改为 MQTT Discovery；新增谷/平/峰/尖分时实体；
   MySQL 改为业务表结构并默认永久保留；新增模拟数据测试脚本。
 - **2026-07-06**：Fork 自 ARC-MX 分支，针对 HA Add-on 场景专项修复：
-  - 固定 Chrome for Testing 120.0.6099.109（解决 Chromium 150 在 HA OS 中崩溃）
-  - CDP 反指纹注入（解决 RK001 腾讯风控拦截）
+  - 两种架构统一使用 Chrome for Testing 156.0.8078.47 与对应 ChromeDriver
+  - 修正容器浏览器身份信息不一致的问题（实际 Chromium 与伪造的 Windows Chrome 136 冲突）
   - 验证码隐藏元素检测修复
   - 二维码登录通知改用 HA 持久通知（告别 PushPlus 实名认证）
   - GitHub Actions 自动构建并推送至 ghcr.io

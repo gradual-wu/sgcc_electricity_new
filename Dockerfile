@@ -8,6 +8,7 @@ ENV TZ=Asia/Shanghai
 
 
 ARG TARGETARCH
+ARG CHROME_VER=156.0.8078.47
 ARG VERSION
 ENV VERSION=${VERSION}
 ENV PYTHON_IN_DOCKER='PYTHON_IN_DOCKER'
@@ -24,17 +25,19 @@ RUN apt-get --allow-releaseinfo-change update \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && dpkg-reconfigure --frontend noninteractive tzdata \
-    && if [ "$TARGETARCH" = "amd64" ]; then \
-           CHROME_VER="120.0.6099.109" \
-           && wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chrome-linux64.zip" -O /tmp/chrome.zip \
-           && wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/linux64/chromedriver-linux64.zip" -O /tmp/chromedriver.zip \
-           && unzip -q /tmp/chrome.zip -d /opt/ \
-           && unzip -q /tmp/chromedriver.zip -d /opt/ \
-           && rm -f /usr/bin/chromium /usr/bin/chromedriver \
-           && ln -sf /opt/chrome-linux64/chrome /usr/bin/chromium \
-           && ln -sf /opt/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
-           && rm -f /tmp/chrome.zip /tmp/chromedriver.zip; \
-       fi \
+    && case "$TARGETARCH" in \
+         amd64) CHROME_PLATFORM=linux64 ;; \
+         arm64) CHROME_PLATFORM=linux-arm64 ;; \
+         *) echo "不支持的浏览器架构: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/${CHROME_PLATFORM}/chrome-${CHROME_PLATFORM}.zip" -O /tmp/chrome.zip \
+    && wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VER}/${CHROME_PLATFORM}/chromedriver-${CHROME_PLATFORM}.zip" -O /tmp/chromedriver.zip \
+    && unzip -q /tmp/chrome.zip -d /opt/ \
+    && unzip -q /tmp/chromedriver.zip -d /opt/ \
+    && rm -f /usr/bin/chromium /usr/bin/chromedriver \
+    && ln -sf "/opt/chrome-${CHROME_PLATFORM}/chrome" /usr/bin/chromium \
+    && ln -sf "/opt/chromedriver-${CHROME_PLATFORM}/chromedriver" /usr/bin/chromedriver \
+    && rm -f /tmp/chrome.zip /tmp/chromedriver.zip \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
